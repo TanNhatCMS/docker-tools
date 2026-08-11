@@ -107,8 +107,8 @@ jobs:
             latest=false
           tags: |
             type=raw,value=latest${{ steps.lane.outputs.suffix }}
-            type=raw,value=${{ env.VERSION }}${{ steps.lane.outputs.suffix }}
-            type=raw,value=${{ env.VERSION }}${{ steps.lane.outputs.suffix }}-base-${{ steps.base_digest.outputs.short }}-rt-${{ steps.base_digest.outputs.rt_short }}
+            type=raw,value=${{ steps.version.outputs.version }}${{ steps.lane.outputs.suffix }}
+            type=raw,value=${{ steps.version.outputs.version }}${{ steps.lane.outputs.suffix }}-base-${{ steps.base_digest.outputs.short }}-rt-${{ steps.base_digest.outputs.rt_short }}
             type=sha,prefix=${{ steps.lane.outputs.prefix }}sha-,format=short
 
       - name: Build and push API image
@@ -128,7 +128,7 @@ jobs:
           provenance: false
           sbom: false
           build-args: |
-            APP_VERSION=${{ env.VERSION }}
+            APP_VERSION=${{ steps.version.outputs.version }}
             BASE_IMAGE=${{ steps.lane.outputs.base_image }}
             RUNTIME_BASE_IMAGE=${{ steps.lane.outputs.runtime_base_image }}
             GIT_COMMIT_HASH=${{ github.event.client_payload.sha }}
@@ -139,7 +139,7 @@ jobs:
           echo "## 🐳 API Image Published" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "**Image:** \`${{ env.REGISTRY }}/${{ env.OWNER }}/qlcv-api\`" >> "$GITHUB_STEP_SUMMARY"
-          echo "**Version:** \`${{ env.VERSION }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "**Version:** \`${{ steps.version.outputs.version }}\`" >> "$GITHUB_STEP_SUMMARY"
           echo "**Branch:** \`${{ github.event.client_payload.branch }}\`" >> "$GITHUB_STEP_SUMMARY"
           echo "**Base Digest:** \`${{ steps.base_digest.outputs.short }}\`" >> "$GITHUB_STEP_SUMMARY"
           echo "**Runtime Digest:** \`${{ steps.base_digest.outputs.rt_short }}\`" >> "$GITHUB_STEP_SUMMARY"
