@@ -1,0 +1,171 @@
+name: Docker Publish API Build (Dev)
+
+# DEV variant — copy của docker-publish-api.yml kích hoạt riêng cho branch dev.
+# Khác biệt duy nhất: checkout submodules (backend nằm trong platform/server submodule).
+# Sau khi hợp nhất về main: merge 2 file lại, xóa bản .dev.yml này.
+
+on:
+  repository_dispatch:
+    types: [trigger-publish-api-dev]
+
+concurrency:
+  group: docker-publish-api-dev-${{ github.event.client_payload.branch }}
+  cancel-in-progress: true
+
+env:
+  REGISTRY: ghcr.io
+  OWNER: tannhatcms
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build-api:
+    name: Build & Push API
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout Main Repository
+        uses: actions/checkout@v7
+        with:
+          repository: TanNhatCMS/QuanLyCongViec
+          ref: ${{ github.event.client_payload.branch }}
+          fetch-depth: 0
+          token: ${{ secrets.MAIN_REPO_CHECKOUT_TOKEN }}
+          submodules: true
+
+      - name: Checkout exact commit SHA
+        run: |
+          git checkout ${{ github.event.client_payload.sha }}
+          git submodule update --init --recursive
+
+      - name: Resolve version
+        id: version
+        run: |
+          if [ -n "${{ github.event.client_payload.version }}" ]; then
+            VERSION="${{ github.event.client_payload.version }}"
+            echo "Source: client_payload"
+          else
+            VERSION=$(node -p "require('./package.json').version" 2>/dev/null || echo "dev")
+            echo "Source: package.json"
+          fi
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Resolved version: $VERSION"
+
+      - name: Resolve lane prefix
+        id: lane
+        run: |
+          BRANCH="${{ github.event.client_payload.branch }}"
+          if [ "$BRANCH" = "main" ]; then
+            echo "prefix=" >> $GITHUB_OUTPUT
+            echo "suffix=" >> $GITHUB_OUTPUT
+            echo "base_image=${{ env.REGISTRY }}/${{ env.OWNER }}/qlcv-api-base:latest" >> $GITHUB_OUTPUT
+            echo "runtime_base_image=${{ env.REGISTRY }}/${{ env.OWNER }}/qlcv-api-runtime-base:latest" >> $GITHUB_OUTPUT
+          else
+            echo "prefix=${BRANCH}-" >> $GITHUB_OUTPUT
+            echo "suffix=-${BRANCH}" >> $GITHUB_OUTPUT
+            echo "base_image=${{ env.REGISTRY }}/${{ env.OWNER }}/qlcv-api-base:latest-${BRANCH}" >> $GITHUB_OUTPUT
+            echo "runtime_base_image=${{ env.REGISTRY }}/${{ env.OWNER }}/qlcv-api-runtime-base:latest-${BRANCH}" >> $GITHUB_OUTPUT
+          fi
+          echo "Branch: $BRANCH"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Login to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ env.OWNER }}
+          password: ${{ secrets.MAIN_REPO_CHECKOUT_TOKEN }}
+
+      - name: Pull base images for caching
+        run: |
+          docker pull ${{ steps.lane.outputs.base_image }} || true
+          docker pull ${{ steps.lane.outputs.runtime_base_image }} || true
+
+      - name: Extract Base Image Digest
+        id: base_digest
+        run: |
+          RAW_DIGEST=$(docker image inspect ${{ steps.lane.outputs.base_image }} 2>/dev/null | jq -r '.[0].RepoDigests[0] // .[0].Id' 2>/dev/null || echo "")
+          DIGEST=${RAW_DIGEST#*sha256:}
+          DIGEST=${DIGEST:0:7}
+          if [ -z "$DIGEST" ] || [ "$DIGEST" = "null" ]; then DIGEST="unknown"; fi
+          echo "Base Digest: $DIGEST"
+          echo "short=${DIGEST}" >> $GITHUB_OUTPUT
+
+          RAW_RT=$(docker image inspect ${{ steps.lane.outputs.runtime_base_image }} 2>/dev/null | jq -r '.[0].RepoDigests[0] // .[0].Id' 2>/dev/null || echo "")
+          RT_DIGEST=${RAW_RT#*sha256:}
+          RT_DIGEST=${RT_DIGEST:0:7}
+          if [ -z "$RT_DIGEST" ] || [ "$RT_DIGEST" = "null" ]; then RT_DIGEST="unknown"; fi
+          echo "Runtime Digest: $RT_DIGEST"
+          echo "rt_short=${RT_DIGEST}" >> $GITHUB_OUTPUT
+
+      - name: Decrypt Secrets
+        id: decrypt
+        env:
+          ENCRYPTED_PAYLOAD: ${{ github.event.client_payload.encrypted_payload }}
+          PAYLOAD_ENCRYPTION_KEY: ${{ secrets.PAYLOAD_ENCRYPTION_KEY }}
+        run: |
+          if [ -n "$ENCRYPTED_PAYLOAD" ]; then
+            echo "$ENCRYPTED_PAYLOAD" | base64 -d | openssl enc -d -aes-256-cbc -salt -pbkdf2 -pass pass:$PAYLOAD_ENCRYPTION_KEY -out decrypted.json
+
+            MEDIATR=$(jq -r '.mediatr_licensekey // empty' decrypted.json)
+            [ -n "$MEDIATR" ] && echo "::add-mask::$MEDIATR"
+            echo "mediatr_licensekey=$MEDIATR" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Docker metadata
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.OWNER }}/qlcv-api
+          flavor: |
+            latest=false
+          tags: |
+            type=raw,value=latest${{ steps.lane.outputs.suffix }}
+            type=raw,value=${{ steps.version.outputs.version }}${{ steps.lane.outputs.suffix }}
+            type=raw,value=${{ steps.version.outputs.version }}${{ steps.lane.outputs.suffix }}-base-${{ steps.base_digest.outputs.short }}-rt-${{ steps.base_digest.outputs.rt_short }}
+            type=sha,prefix=${{ steps.lane.outputs.prefix }}sha-,format=short
+
+      - name: Build and push API image
+        id: build
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: docker/dotnet/Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: |
+            type=registry,ref=${{ env.REGISTRY }}/${{ env.OWNER }}/qlcv-api:latest${{ steps.lane.outputs.suffix }}
+            type=gha,scope=publish-api
+          cache-to: type=gha,mode=max,scope=publish-api
+          provenance: false
+          sbom: false
+          build-args: |
+            APP_VERSION=${{ steps.version.outputs.version }}
+            BASE_IMAGE=${{ steps.lane.outputs.base_image }}
+            RUNTIME_BASE_IMAGE=${{ steps.lane.outputs.runtime_base_image }}
+            GIT_COMMIT_HASH=${{ github.event.client_payload.sha }}
+            MEDIATR__LICENSEKEY=${{ steps.decrypt.outputs.mediatr_licensekey }}
+
+      - name: Summary
+        run: |
+          echo "## 🐳 API Image Published (dev)" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "**Image:** \`${{ env.REGISTRY }}/${{ env.OWNER }}/qlcv-api\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "**Version:** \`${{ steps.version.outputs.version }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "**Branch:** \`${{ github.event.client_payload.branch }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "**Base Digest:** \`${{ steps.base_digest.outputs.short }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "**Runtime Digest:** \`${{ steps.base_digest.outputs.rt_short }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "**Digest:** \`${{ steps.build.outputs.digest }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "### Tags" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          echo "${{ steps.meta.outputs.tags }}" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
