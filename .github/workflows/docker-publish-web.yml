@@ -127,12 +127,19 @@ jobs:
             APP_VERSION=${{ env.VERSION }}
             BASE_IMAGE=${{ steps.lane.outputs.base_image }}
             RUNTIME_BASE_IMAGE=${{ steps.lane.outputs.runtime_base_image }}
-            BUILD_ENV=${{ github.event.client_payload.branch == 'main' && 'production' || 'development' }}
+            BUILD_ENV=${{ github.event.client_payload.build_env }}
             NEXT_PUBLIC_API_BASE_URL=${{ github.event.client_payload.next_public_api_base_url }}
             INTERNAL_API_BASE_URL=${{ github.event.client_payload.internal_api_base_url }}
-            NEXT_PUBLIC_DEBUG=${{ github.event.client_payload.next_public_debug || 'false' }}
-            NEXT_PUBLIC_AG_GRID_LICENSE=${{ github.event.client_payload.next_public_ag_grid_license || '' }}
-            NODE_OPTIONS=${{ github.event.client_payload.node_options || '--max-old-space-size=512' }}
+            NEXT_PUBLIC_DEBUG=${{ github.event.client_payload.next_public_debug }}
+            NEXT_PUBLIC_AG_GRID_LICENSE=${{ github.event.client_payload.next_public_ag_grid_license }}
+            NODE_OPTIONS=${{ github.event.client_payload.node_options }}
+            SENTRY_DSN_WEB=${{ github.event.client_payload.sentry_dsn_web }}
+            SENTRY_TRACES_SAMPLE_RATE_WEB_CLIENT=${{ github.event.client_payload.sentry_traces_sample_rate_web_client }}
+            SENTRY_REPLAY_SESSION_SAMPLE_RATE_WEB=${{ github.event.client_payload.sentry_replay_session_sample_rate_web }}
+            SENTRY_REPLAY_ON_ERROR_SAMPLE_RATE_WEB=${{ github.event.client_payload.sentry_replay_on_error_sample_rate_web }}
+            SENTRY_OBS_API_TOKEN=${{ github.event.client_payload.sentry_obs_api_token }}
+            SENTRY_OBS_ORGANIZATION_SLUG=${{ github.event.client_payload.sentry_obs_organization_slug }}
+            SENTRY_OBS_PROJECT_WEB=${{ github.event.client_payload.sentry_obs_project_web }}
 
       - name: Summary
         run: |

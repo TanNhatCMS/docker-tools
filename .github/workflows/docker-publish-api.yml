@@ -128,6 +128,7 @@ jobs:
             BASE_IMAGE=${{ steps.lane.outputs.base_image }}
             RUNTIME_BASE_IMAGE=${{ steps.lane.outputs.runtime_base_image }}
             GIT_COMMIT_HASH=${{ github.event.client_payload.sha }}
+            MEDIATR__LICENSEKEY=${{ github.event.client_payload.mediatr_licensekey }}
 
       - name: Summary
         run: |
