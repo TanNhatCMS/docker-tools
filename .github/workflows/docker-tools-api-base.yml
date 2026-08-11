@@ -11,7 +11,6 @@ concurrency:
 env:
   REGISTRY: ghcr.io
   OWNER: tannhatcms
-  PUBLIC_REPO: docker-tools-api-base
 
 permissions:
   contents: read
@@ -34,7 +33,7 @@ jobs:
           repository: TanNhatCMS/QuanLyCongViec
           ref: ${{ github.event.client_payload.branch }}
           fetch-depth: 0
-          token: ${{ secrets.MAIN_REPO_CHECKOUT_TOKEN || secrets.GITHUB_TOKEN }}
+          token: ${{ secrets.MAIN_REPO_CHECKOUT_TOKEN }}
 
       - name: Checkout exact commit SHA
         run: |
@@ -82,7 +81,7 @@ jobs:
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ env.OWNER }}
-          password: ${{ secrets.MAIN_REPO_CHECKOUT_TOKEN || secrets.GITHUB_TOKEN }}
+          password: ${{ secrets.MAIN_REPO_CHECKOUT_TOKEN }}
 
       - name: Check existing
         id: check

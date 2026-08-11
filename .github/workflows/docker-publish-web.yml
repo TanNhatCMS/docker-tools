@@ -1,0 +1,151 @@
+name: Docker Publish Web Build
+
+on:
+  repository_dispatch:
+    types: [trigger-publish-web]
+
+concurrency:
+  group: docker-publish-web-${{ github.event.client_payload.branch }}
+  cancel-in-progress: true
+
+env:
+  REGISTRY: ghcr.io
+  OWNER: tannhatcms
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build-web:
+    name: Build & Push Web
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout Main Repository
+        uses: actions/checkout@v4
+        with:
+          repository: TanNhatCMS/QuanLyCongViec
+          ref: ${{ github.event.client_payload.branch }}
+          fetch-depth: 0
+          token: ${{ secrets.MAIN_REPO_CHECKOUT_TOKEN || secrets.GITHUB_TOKEN }}
+
+      - name: Checkout exact commit SHA
+        run: |
+          git checkout ${{ github.event.client_payload.sha }}
+
+      - name: Resolve version
+        id: version
+        run: |
+          if [ -n "${{ github.event.client_payload.version }}" ]; then
+            VERSION="${{ github.event.client_payload.version }}"
+            echo "Source: client_payload"
+          else
+            VERSION=$(node -p "require('./package.json').version" 2>/dev/null || echo "dev")
+            echo "Source: package.json"
+          fi
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Resolved version: $VERSION"
+
+      - name: Resolve lane prefix
+        id: lane
+        run: |
+          BRANCH="${{ github.event.client_payload.branch }}"
+          if [ "$BRANCH" = "main" ]; then
+            echo "prefix=" >> $GITHUB_OUTPUT
+            echo "suffix=" >> $GITHUB_OUTPUT
+            echo "base_image=${{ env.REGISTRY }}/${{ env.OWNER }}/qlcv-web-base:latest" >> $GITHUB_OUTPUT
+            echo "runtime_base_image=${{ env.REGISTRY }}/${{ env.OWNER }}/qlcv-web-runtime-base:latest" >> $GITHUB_OUTPUT
+          else
+            echo "prefix=${BRANCH}-" >> $GITHUB_OUTPUT
+            echo "suffix=-${BRANCH}" >> $GITHUB_OUTPUT
+            echo "base_image=${{ env.REGISTRY }}/${{ env.OWNER }}/qlcv-web-base:latest-${BRANCH}" >> $GITHUB_OUTPUT
+            echo "runtime_base_image=${{ env.REGISTRY }}/${{ env.OWNER }}/qlcv-web-runtime-base:latest-${BRANCH}" >> $GITHUB_OUTPUT
+          fi
+          echo "Branch: $BRANCH"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Login to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ env.OWNER }}
+          password: ${{ secrets.MAIN_REPO_CHECKOUT_TOKEN || secrets.GITHUB_TOKEN }}
+
+      - name: Pull base images for caching
+        run: |
+          docker pull ${{ steps.lane.outputs.base_image }} || true
+          docker pull ${{ steps.lane.outputs.runtime_base_image }} || true
+
+      - name: Extract Base Image Digest
+        id: base_digest
+        run: |
+          DIGEST=$(docker inspect --format='{{index .RepoDigests 0}}' ${{ steps.lane.outputs.base_image }} | awk -F'@' '{print $2}')
+          SHORT_DIGEST=$(echo $DIGEST | sed 's/sha256://' | cut -c1-7)
+          if [ -z "$SHORT_DIGEST" ]; then SHORT_DIGEST="unknown"; fi
+          echo "short=${SHORT_DIGEST}" >> $GITHUB_OUTPUT
+          
+          RT_DIGEST=$(docker inspect --format='{{index .RepoDigests 0}}' ${{ steps.lane.outputs.runtime_base_image }} | awk -F'@' '{print $2}')
+          RT_SHORT=$(echo $RT_DIGEST | sed 's/sha256://' | cut -c1-7)
+          if [ -z "$RT_SHORT" ]; then RT_SHORT="unknown"; fi
+          echo "rt_short=${RT_SHORT}" >> $GITHUB_OUTPUT
+
+      - name: Docker metadata
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.OWNER }}/qlcv-web
+          flavor: |
+            latest=false
+          tags: |
+            type=raw,value=latest${{ steps.lane.outputs.suffix }}
+            type=raw,value=${{ env.VERSION }}${{ steps.lane.outputs.suffix }}
+            type=raw,value=${{ env.VERSION }}${{ steps.lane.outputs.suffix }}-base-${{ steps.base_digest.outputs.short }}-rt-${{ steps.base_digest.outputs.rt_short }}
+            type=sha,prefix=${{ steps.lane.outputs.prefix }}sha-,format=short
+
+      - name: Build and push Web image
+        id: build
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: docker/nextjs/Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: |
+            type=registry,ref=${{ env.REGISTRY }}/${{ env.OWNER }}/qlcv-web:latest${{ steps.lane.outputs.suffix }}
+            type=gha,scope=publish-web
+          cache-to: type=gha,mode=max,scope=publish-web
+          provenance: false
+          sbom: false
+          build-args: |
+            APP_VERSION=${{ env.VERSION }}
+            BASE_IMAGE=${{ steps.lane.outputs.base_image }}
+            RUNTIME_BASE_IMAGE=${{ steps.lane.outputs.runtime_base_image }}
+            BUILD_ENV=${{ github.event.client_payload.branch == 'main' && 'production' || 'development' }}
+            NEXT_PUBLIC_API_BASE_URL=${{ github.event.client_payload.next_public_api_base_url }}
+            INTERNAL_API_BASE_URL=${{ github.event.client_payload.internal_api_base_url }}
+            NEXT_PUBLIC_DEBUG=${{ github.event.client_payload.next_public_debug || 'false' }}
+            NEXT_PUBLIC_AG_GRID_LICENSE=${{ github.event.client_payload.next_public_ag_grid_license || '' }}
+            NODE_OPTIONS=${{ github.event.client_payload.node_options || '--max-old-space-size=512' }}
+
+      - name: Summary
+        run: |
+          echo "## 🌐 Web Image Published" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "**Image:** \`${{ env.REGISTRY }}/${{ env.OWNER }}/qlcv-web\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "**Version:** \`${{ env.VERSION }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "**Branch:** \`${{ github.event.client_payload.branch }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "**Base Digest:** \`${{ steps.base_digest.outputs.short }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "**Runtime Digest:** \`${{ steps.base_digest.outputs.rt_short }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "**Digest:** \`${{ steps.build.outputs.digest }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "### Tags" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          echo "${{ steps.meta.outputs.tags }}" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"

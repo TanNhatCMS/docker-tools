@@ -1,0 +1,141 @@
+name: Docker Publish Nginx Build
+
+on:
+  repository_dispatch:
+    types: [trigger-publish-nginx]
+
+concurrency:
+  group: docker-publish-nginx-${{ github.event.client_payload.branch }}
+  cancel-in-progress: true
+
+env:
+  REGISTRY: ghcr.io
+  OWNER: tannhatcms
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  resolve-lanes:
+    name: Resolve lanes
+    runs-on: ubuntu-latest
+    outputs:
+      lanes: ${{ steps.resolve.outputs.lanes }}
+    steps:
+      - name: Resolve lanes theo branch
+        id: resolve
+        run: |
+          BRANCH="${{ github.event.client_payload.branch }}"
+          if [ "$BRANCH" = "main" ]; then
+            echo 'lanes=["prod","staging"]' >> $GITHUB_OUTPUT
+          else
+            echo 'lanes=["dev"]' >> $GITHUB_OUTPUT
+          fi
+          echo "Branch: $BRANCH"
+
+  build-nginx:
+    name: Build & Push Nginx (${{ matrix.lane }})
+    needs: resolve-lanes
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        lane: ${{ fromJson(needs.resolve-lanes.outputs.lanes) }}
+
+    steps:
+      - name: Checkout Main Repository
+        uses: actions/checkout@v4
+        with:
+          repository: TanNhatCMS/QuanLyCongViec
+          ref: ${{ github.event.client_payload.branch }}
+          fetch-depth: 0
+          token: ${{ secrets.MAIN_REPO_CHECKOUT_TOKEN || secrets.GITHUB_TOKEN }}
+
+      - name: Checkout exact commit SHA
+        run: |
+          git checkout ${{ github.event.client_payload.sha }}
+
+      - name: Resolve version
+        id: version
+        run: |
+          if [ -n "${{ github.event.client_payload.version }}" ]; then
+            VERSION="${{ github.event.client_payload.version }}"
+            echo "Source: client_payload"
+          else
+            VERSION=$(node -p "require('./package.json').version" 2>/dev/null || echo "dev")
+            echo "Source: package.json"
+          fi
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Resolved version: $VERSION"
+
+      - name: Resolve tag prefix
+        id: prefix
+        run: |
+          LANE="${{ matrix.lane }}"
+          if [ "$LANE" = "prod" ]; then
+            echo "prefix=" >> $GITHUB_OUTPUT
+            echo "suffix=" >> $GITHUB_OUTPUT
+          else
+            echo "prefix=${LANE}-" >> $GITHUB_OUTPUT
+            echo "suffix=-${LANE}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Docker metadata
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.OWNER }}/qlcv-nginx
+          flavor: |
+            latest=false
+          tags: |
+            type=raw,value=latest${{ steps.prefix.outputs.suffix }}
+            type=raw,value=${{ env.VERSION }}${{ steps.prefix.outputs.suffix }}
+            type=sha,prefix=${{ steps.prefix.outputs.prefix }}sha-,format=short
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Login to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ env.OWNER }}
+          password: ${{ secrets.MAIN_REPO_CHECKOUT_TOKEN || secrets.GITHUB_TOKEN }}
+
+      - name: Build and push Nginx image
+        id: build
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: docker/nginx/Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: |
+            type=registry,ref=${{ env.REGISTRY }}/${{ env.OWNER }}/qlcv-nginx:latest${{ steps.prefix.outputs.suffix }}
+            type=gha,scope=nginx-${{ matrix.lane }}
+          cache-to: type=gha,mode=max,scope=nginx-${{ matrix.lane }}
+          provenance: false
+          sbom: false
+          build-args: |
+            APP_VERSION=${{ env.VERSION }}
+            NGINX_ENV=${{ matrix.lane }}
+
+      - name: Summary
+        run: |
+          echo "## 🔧 Nginx Image Published (${{ matrix.lane }})" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "**Image:** \`${{ env.REGISTRY }}/${{ env.OWNER }}/qlcv-nginx\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "**Lane:** \`${{ matrix.lane }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "**Version:** \`${{ env.VERSION }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "**Branch:** \`${{ github.event.client_payload.branch }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "**Digest:** \`${{ steps.build.outputs.digest }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "### Tags" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          echo "${{ steps.meta.outputs.tags }}" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
