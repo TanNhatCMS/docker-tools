@@ -104,18 +104,18 @@ jobs:
       - name: Extract Base Image Digest
         id: base_digest
         run: |
-          DIGEST=$(docker inspect --format='{{if .RepoDigests}}{{index .RepoDigests 0}}{{else}}{{.Id}}{{end}}' ${{ steps.lane.outputs.base_image }} 2>/dev/null | awk -F'@' '{print $NF}' | sed 's/sha256://' | cut -c1-7)
-          if [ -z "$DIGEST" ] || [ "$DIGEST" = "<no value>" ]; then
-            DIGEST=$(docker image inspect --format='{{.Id}}' ${{ steps.lane.outputs.base_image }} 2>/dev/null | sed 's/sha256://' | cut -c1-7)
-          fi
-          if [ -z "$DIGEST" ]; then DIGEST="unknown"; fi
+          RAW_DIGEST=$(docker image inspect ${{ steps.lane.outputs.base_image }} 2>/dev/null | jq -r '.[0].RepoDigests[0] // .[0].Id' 2>/dev/null || echo "")
+          DIGEST=${RAW_DIGEST#*sha256:}
+          DIGEST=${DIGEST:0:7}
+          if [ -z "$DIGEST" ] || [ "$DIGEST" = "null" ]; then DIGEST="unknown"; fi
+          echo "Base Digest: $DIGEST"
           echo "short=${DIGEST}" >> $GITHUB_OUTPUT
 
-          RT_DIGEST=$(docker inspect --format='{{if .RepoDigests}}{{index .RepoDigests 0}}{{else}}{{.Id}}{{end}}' ${{ steps.lane.outputs.runtime_base_image }} 2>/dev/null | awk -F'@' '{print $NF}' | sed 's/sha256://' | cut -c1-7)
-          if [ -z "$RT_DIGEST" ] || [ "$RT_DIGEST" = "<no value>" ]; then
-            RT_DIGEST=$(docker image inspect --format='{{.Id}}' ${{ steps.lane.outputs.runtime_base_image }} 2>/dev/null | sed 's/sha256://' | cut -c1-7)
-          fi
-          if [ -z "$RT_DIGEST" ]; then RT_DIGEST="unknown"; fi
+          RAW_RT=$(docker image inspect ${{ steps.lane.outputs.runtime_base_image }} 2>/dev/null | jq -r '.[0].RepoDigests[0] // .[0].Id' 2>/dev/null || echo "")
+          RT_DIGEST=${RAW_RT#*sha256:}
+          RT_DIGEST=${RT_DIGEST:0:7}
+          if [ -z "$RT_DIGEST" ] || [ "$RT_DIGEST" = "null" ]; then RT_DIGEST="unknown"; fi
+          echo "Runtime Digest: $RT_DIGEST"
           echo "rt_short=${RT_DIGEST}" >> $GITHUB_OUTPUT
       - name: Decrypt Secrets
         id: decrypt
