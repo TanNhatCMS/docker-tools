@@ -53,7 +53,7 @@ jobs:
           else
             VERSION=$(node -p "require('./package.json').version")
           fi
-          HASH=$(cat Directory.Build.props Directory.Packages.props global.json | sha256sum | cut -d' ' -f1)
+          HASH=$(cat platform/server/Directory.Build.props platform/server/Directory.Packages.props platform/server/global.json | sha256sum | cut -d' ' -f1)
           IMAGE_NAME="${{ env.REGISTRY }}/${{ env.OWNER }}/qlcv-api-base"
 
           BRANCH="${{ github.event.client_payload.branch }}"
