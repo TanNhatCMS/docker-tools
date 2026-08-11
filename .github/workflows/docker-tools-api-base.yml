@@ -81,8 +81,8 @@ jobs:
         uses: docker/login-action@v4
         with:
           registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.MAIN_REPO_CHECKOUT_TOKEN }}
+          username: ${{ env.OWNER }}
+          password: ${{ secrets.MAIN_REPO_CHECKOUT_TOKEN || secrets.DOCKER_TOOLS_PAT || secrets.GITHUB_TOKEN }}
 
       - name: Check existing
         id: check
