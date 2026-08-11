@@ -104,14 +104,14 @@ jobs:
       - name: Extract Base Image Digest
         id: base_digest
         run: |
-          DIGEST=$(docker inspect --format='{{if .RepoDigests}}{{index .RepoDigests 0}}{{else}}{{.Id}}{{end}}' ${{ steps.lane.outputs.base_image }} 2>/dev/null | awk -F'@' '{print $2}' | sed 's/sha256://' | cut -c1-7)
+          DIGEST=$(docker inspect --format='{{if .RepoDigests}}{{index .RepoDigests 0}}{{else}}{{.Id}}{{end}}' ${{ steps.lane.outputs.base_image }} 2>/dev/null | awk -F'@' '{print $NF}' | sed 's/sha256://' | cut -c1-7)
           if [ -z "$DIGEST" ] || [ "$DIGEST" = "<no value>" ]; then
             DIGEST=$(docker image inspect --format='{{.Id}}' ${{ steps.lane.outputs.base_image }} 2>/dev/null | sed 's/sha256://' | cut -c1-7)
           fi
           if [ -z "$DIGEST" ]; then DIGEST="unknown"; fi
           echo "short=${DIGEST}" >> $GITHUB_OUTPUT
 
-          RT_DIGEST=$(docker inspect --format='{{if .RepoDigests}}{{index .RepoDigests 0}}{{else}}{{.Id}}{{end}}' ${{ steps.lane.outputs.runtime_base_image }} 2>/dev/null | awk -F'@' '{print $2}' | sed 's/sha256://' | cut -c1-7)
+          RT_DIGEST=$(docker inspect --format='{{if .RepoDigests}}{{index .RepoDigests 0}}{{else}}{{.Id}}{{end}}' ${{ steps.lane.outputs.runtime_base_image }} 2>/dev/null | awk -F'@' '{print $NF}' | sed 's/sha256://' | cut -c1-7)
           if [ -z "$RT_DIGEST" ] || [ "$RT_DIGEST" = "<no value>" ]; then
             RT_DIGEST=$(docker image inspect --format='{{.Id}}' ${{ steps.lane.outputs.runtime_base_image }} 2>/dev/null | sed 's/sha256://' | cut -c1-7)
           fi
