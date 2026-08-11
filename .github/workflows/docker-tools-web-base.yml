@@ -33,7 +33,7 @@ jobs:
         with:
           repository: TanNhatCMS/QuanLyCongViec
           ref: ${{ github.event.client_payload.branch }}
-          token: ${{ secrets.MAIN_REPO_CHECKOUT_TOKEN || secrets.DESKTOP_UPDATES_TRIGGER_TOKEN || secrets.DOCKER_TOOLS_TRIGGER_TOKEN || secrets.GITHUB_TOKEN }}
+          token: ${{ secrets.MAIN_REPO_CHECKOUT_TOKEN || secrets.DOCKER_TOOLS_CHECKOUT_TOKEN || secrets.GITHUB_TOKEN }}
 
       - name: Checkout exact commit SHA
         run: |
