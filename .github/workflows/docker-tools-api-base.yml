@@ -82,7 +82,7 @@ jobs:
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          password: ${{ secrets.MAIN_REPO_CHECKOUT_TOKEN }}
 
       - name: Check existing
         id: check

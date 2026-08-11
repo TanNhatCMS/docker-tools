@@ -82,7 +82,7 @@ jobs:
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          password: ${{ secrets.MAIN_REPO_CHECKOUT_TOKEN }}
 
       - name: Check existing
         id: check
@@ -97,12 +97,12 @@ jobs:
             echo "exists=false" >> $GITHUB_OUTPUT
             echo "will build"
           fi
-          
+
           NODE_VERSION="${{ github.event.client_payload.node_version }}"
           if [ -z "$NODE_VERSION" ]; then
             NODE_VERSION="24-bookworm-slim"
           fi
-          
+
           if docker manifest inspect "${{ steps.calc.outputs.latest }}" >/dev/null 2>&1; then
             echo "base_image=${{ steps.calc.outputs.latest }}" >> $GITHUB_OUTPUT
             echo "use_registry_cache=true" >> $GITHUB_OUTPUT
