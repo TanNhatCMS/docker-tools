@@ -24,7 +24,7 @@ jobs:
 
     steps:
       - name: Checkout Main Repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           repository: TanNhatCMS/QuanLyCongViec
           ref: ${{ github.event.client_payload.branch }}
