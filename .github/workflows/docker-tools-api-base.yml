@@ -34,7 +34,7 @@ jobs:
           repository: TanNhatCMS/QuanLyCongViec
           ref: ${{ github.event.client_payload.branch }}
           fetch-depth: 0
-          token: ${{ secrets.MAIN_REPO_CHECKOUT_TOKEN || secrets.DOCKER_TOOLS_CHECKOUT_TOKEN || secrets.GITHUB_TOKEN }}
+          token: ${{ secrets.MAIN_REPO_CHECKOUT_TOKEN || secrets.GITHUB_TOKEN }}
 
       - name: Checkout exact commit SHA
         run: |
@@ -82,7 +82,7 @@ jobs:
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ env.OWNER }}
-          password: ${{ secrets.MAIN_REPO_CHECKOUT_TOKEN || secrets.DOCKER_TOOLS_PAT || secrets.GITHUB_TOKEN }}
+          password: ${{ secrets.MAIN_REPO_CHECKOUT_TOKEN || secrets.GITHUB_TOKEN }}
 
       - name: Check existing
         id: check
