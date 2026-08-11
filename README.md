@@ -4,10 +4,10 @@ Sub-repo chứa public base images cho **QuanLyCongViec**.
 
 ## 📦 Public Images
 
-| Image | Tag | Mô tả |
-|-------|-----|-------|
+| Image                             | Tag                         | Mô tả                           |
+| --------------------------------- | --------------------------- | ------------------------------- |
 | `ghcr.io/tannhatcms/docker-tools` | `qlcv-web-base-deps-{hash}` | Pre-built pnpm + workspace deps |
-| `ghcr.io/tannhatcms/docker-tools` | `qlcv-web-base-latest` | Pointer tới base mới nhất |
+| `ghcr.io/tannhatcms/docker-tools` | `qlcv-web-base-latest`      | Pointer tới base mới nhất       |
 
 ## 🚀 Quick Start
 
@@ -23,13 +23,12 @@ docker build -f docker/nextjs/Dockerfile \
 
 ## 🔧 Workflows
 
-| Workflow | Trigger | Output |
-|----------|---------|--------|
-| `.github/workflows/docker-tools.yml` | push to `main` (deps changed) hoặc manual | base image → `docker-tools` package |
+| Workflow                                   | Trigger                                      | Output                                                             |
+| ------------------------------------------ | -------------------------------------------- | ------------------------------------------------------------------ |
+| `.github/workflows/docker-tools.yml`       | push to `main` (deps changed) hoặc manual    | base image → `docker-tools` package                                |
 | `.github/workflows/docker-publish-web.yml` | push to `main` (version changed) hoặc manual | web image → `quan-ly-cong-viec-web` (pulls base từ `docker-tools`) |
 
 ## 📝 Tại sao tách riêng?
 
-- **Public** base → share được cho fork/contributor.
 - **Cache reuse** cross-repo.
 - **Tách triggers:** deps đổi → rebuild base. Source đổi → rebuild web.
