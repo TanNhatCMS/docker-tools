@@ -84,15 +84,19 @@ jobs:
       - name: Extract Base Image Digest
         id: base_digest
         run: |
-          DIGEST=$(docker inspect --format='{{index .RepoDigests 0}}' ${{ steps.lane.outputs.base_image }} | awk -F'@' '{print $2}')
-          SHORT_DIGEST=$(echo $DIGEST | sed 's/sha256://' | cut -c1-7)
-          if [ -z "$SHORT_DIGEST" ]; then SHORT_DIGEST="unknown"; fi
-          echo "short=${SHORT_DIGEST}" >> $GITHUB_OUTPUT
+          DIGEST=$(docker inspect --format='{{if .RepoDigests}}{{index .RepoDigests 0}}{{else}}{{.Id}}{{end}}' ${{ steps.lane.outputs.base_image }} 2>/dev/null | awk -F'@' '{print $2}' | sed 's/sha256://' | cut -c1-7)
+          if [ -z "$DIGEST" ] || [ "$DIGEST" = "<no value>" ]; then
+            DIGEST=$(docker image inspect --format='{{.Id}}' ${{ steps.lane.outputs.base_image }} 2>/dev/null | sed 's/sha256://' | cut -c1-7)
+          fi
+          if [ -z "$DIGEST" ]; then DIGEST="unknown"; fi
+          echo "short=${DIGEST}" >> $GITHUB_OUTPUT
           
-          RT_DIGEST=$(docker inspect --format='{{index .RepoDigests 0}}' ${{ steps.lane.outputs.runtime_base_image }} | awk -F'@' '{print $2}')
-          RT_SHORT=$(echo $RT_DIGEST | sed 's/sha256://' | cut -c1-7)
-          if [ -z "$RT_SHORT" ]; then RT_SHORT="unknown"; fi
-          echo "rt_short=${RT_SHORT}" >> $GITHUB_OUTPUT
+          RT_DIGEST=$(docker inspect --format='{{if .RepoDigests}}{{index .RepoDigests 0}}{{else}}{{.Id}}{{end}}' ${{ steps.lane.outputs.runtime_base_image }} 2>/dev/null | awk -F'@' '{print $2}' | sed 's/sha256://' | cut -c1-7)
+          if [ -z "$RT_DIGEST" ] || [ "$RT_DIGEST" = "<no value>" ]; then
+            RT_DIGEST=$(docker image inspect --format='{{.Id}}' ${{ steps.lane.outputs.runtime_base_image }} 2>/dev/null | sed 's/sha256://' | cut -c1-7)
+          fi
+          if [ -z "$RT_DIGEST" ]; then RT_DIGEST="unknown"; fi
+          echo "rt_short=${RT_DIGEST}" >> $GITHUB_OUTPUT
 
       - name: Docker metadata
         id: meta
