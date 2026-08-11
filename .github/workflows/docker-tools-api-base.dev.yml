@@ -57,12 +57,14 @@ jobs:
           IMAGE_NAME="${{ env.REGISTRY }}/${{ env.OWNER }}/qlcv-api-base"
 
           BRANCH="${{ github.event.client_payload.branch }}"
-          if [ "$BRANCH" = "main" ]; then
+          # Docker tag không cho phép '/'; branch feat/v3.0.0-dev có '/' → thay bằng '-'.
+          BRANCH_SAFE=$(echo "$BRANCH" | tr '/' '-')
+          if [ "$BRANCH_SAFE" = "main" ]; then
             PREFIX=""
             SUFFIX=""
           else
-            PREFIX="${BRANCH}-"
-            SUFFIX="-${BRANCH}"
+            PREFIX="${BRANCH_SAFE}-"
+            SUFFIX="-${BRANCH_SAFE}"
           fi
 
           COMMIT_SHA=$(echo "${{ github.event.client_payload.sha }}" | cut -c1-7)

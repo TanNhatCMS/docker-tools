@@ -59,16 +59,18 @@ jobs:
         id: lane
         run: |
           BRANCH="${{ github.event.client_payload.branch }}"
-          if [ "$BRANCH" = "main" ]; then
+          # Docker tag không cho phép '/'; branch feat/v3.0.0-dev có '/' → thay bằng '-'.
+          BRANCH_SAFE=$(echo "$BRANCH" | tr '/' '-')
+          if [ "$BRANCH_SAFE" = "main" ]; then
             echo "prefix=" >> $GITHUB_OUTPUT
             echo "suffix=" >> $GITHUB_OUTPUT
             echo "base_image=${{ env.REGISTRY }}/${{ env.OWNER }}/qlcv-api-base:latest" >> $GITHUB_OUTPUT
             echo "runtime_base_image=${{ env.REGISTRY }}/${{ env.OWNER }}/qlcv-api-runtime-base:latest" >> $GITHUB_OUTPUT
           else
-            echo "prefix=${BRANCH}-" >> $GITHUB_OUTPUT
-            echo "suffix=-${BRANCH}" >> $GITHUB_OUTPUT
-            echo "base_image=${{ env.REGISTRY }}/${{ env.OWNER }}/qlcv-api-base:latest-${BRANCH}" >> $GITHUB_OUTPUT
-            echo "runtime_base_image=${{ env.REGISTRY }}/${{ env.OWNER }}/qlcv-api-runtime-base:latest-${BRANCH}" >> $GITHUB_OUTPUT
+            echo "prefix=${BRANCH_SAFE}-" >> $GITHUB_OUTPUT
+            echo "suffix=-${BRANCH_SAFE}" >> $GITHUB_OUTPUT
+            echo "base_image=${{ env.REGISTRY }}/${{ env.OWNER }}/qlcv-api-base:latest-${BRANCH_SAFE}" >> $GITHUB_OUTPUT
+            echo "runtime_base_image=${{ env.REGISTRY }}/${{ env.OWNER }}/qlcv-api-runtime-base:latest-${BRANCH_SAFE}" >> $GITHUB_OUTPUT
           fi
           echo "Branch: $BRANCH"
 
