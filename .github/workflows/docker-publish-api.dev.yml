@@ -144,7 +144,6 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: |
-            type=registry,ref=${{ env.REGISTRY }}/${{ env.OWNER }}/qlcv-api:latest${{ steps.lane.outputs.suffix }}
             type=gha,scope=publish-api
           cache-to: type=gha,mode=max,scope=publish-api
           provenance: false
