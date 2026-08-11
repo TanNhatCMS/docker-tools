@@ -32,12 +32,9 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: TanNhatCMS/QuanLyCongViec
-          ref: ${{ github.event.client_payload.branch }}
+          ref: ${{ github.event.client_payload.sha }}
+          fetch-depth: 0
           token: ${{ secrets.MAIN_REPO_CHECKOUT_TOKEN || secrets.DOCKER_TOOLS_CHECKOUT_TOKEN || secrets.GITHUB_TOKEN }}
-
-      - name: Checkout exact commit SHA
-        run: |
-          git checkout ${{ github.event.client_payload.sha }}
 
       - name: Calculate tag
         id: calc
