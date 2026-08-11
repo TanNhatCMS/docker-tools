@@ -106,8 +106,8 @@ jobs:
           if [ -n "$ENCRYPTED_PAYLOAD" ]; then
             echo "$ENCRYPTED_PAYLOAD" | base64 -d | openssl enc -d -aes-256-cbc -salt -pbkdf2 -pass pass:$PAYLOAD_ENCRYPTION_KEY -out decrypted.json
             
-            MEDIATR=$(jq -r '.mediatr_licensekey' decrypted.json)
-            echo "::add-mask::$MEDIATR"
+            MEDIATR=$(jq -r '.mediatr_licensekey // empty' decrypted.json)
+            [ -n "$MEDIATR" ] && echo "::add-mask::$MEDIATR"
             echo "mediatr_licensekey=$MEDIATR" >> $GITHUB_OUTPUT
           fi
 
