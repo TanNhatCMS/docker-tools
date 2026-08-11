@@ -30,7 +30,7 @@ jobs:
           repository: TanNhatCMS/QuanLyCongViec
           ref: ${{ github.event.client_payload.branch }}
           fetch-depth: 0
-          token: ${{ secrets.MAIN_REPO_CHECKOUT_TOKEN || secrets.GITHUB_TOKEN }}
+          token: ${{ secrets.MAIN_REPO_CHECKOUT_TOKEN }}
 
       - name: Checkout exact commit SHA
         run: |
@@ -57,7 +57,7 @@ jobs:
           images: ${{ env.REGISTRY }}/${{ env.OWNER }}/${{ env.IMAGE_NAME }}
           tags: |
             type=raw,value=latest,enable=${{ github.event.client_payload.branch == 'main' }}
-            type=raw,value=${{ env.VERSION }}
+            type=raw,value=${{ steps.version.outputs.version }}
             type=sha,prefix=sha-,format=short
 
       - name: Set up Docker Buildx
@@ -68,7 +68,7 @@ jobs:
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ env.OWNER }}
-          password: ${{ secrets.MAIN_REPO_CHECKOUT_TOKEN || secrets.GITHUB_TOKEN }}
+          password: ${{ secrets.MAIN_REPO_CHECKOUT_TOKEN }}
 
       - name: Build and push migrator image
         id: build
@@ -87,14 +87,14 @@ jobs:
           provenance: false
           sbom: false
           build-args: |
-            APP_VERSION=${{ env.VERSION }}
+            APP_VERSION=${{ steps.version.outputs.version }}
 
       - name: Summary
         run: |
           echo "## 🐳 DB Migrator Image Published" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "**Image:** \`${{ env.REGISTRY }}/${{ env.OWNER }}/${{ env.IMAGE_NAME }}\`" >> "$GITHUB_STEP_SUMMARY"
-          echo "**Version:** \`${{ env.VERSION }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "**Version:** \`${{ steps.version.outputs.version }}\`" >> "$GITHUB_STEP_SUMMARY"
           echo "**Digest:** \`${{ steps.build.outputs.digest }}\`" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "### Tags" >> "$GITHUB_STEP_SUMMARY"

@@ -29,7 +29,7 @@ jobs:
           repository: TanNhatCMS/QuanLyCongViec
           ref: ${{ github.event.client_payload.branch }}
           fetch-depth: 0
-          token: ${{ secrets.MAIN_REPO_CHECKOUT_TOKEN || secrets.GITHUB_TOKEN }}
+          token: ${{ secrets.MAIN_REPO_CHECKOUT_TOKEN }}
 
       - name: Checkout exact commit SHA
         run: |
@@ -94,7 +94,7 @@ jobs:
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ env.OWNER }}
-          password: ${{ secrets.MAIN_REPO_CHECKOUT_TOKEN || secrets.GITHUB_TOKEN }}
+          password: ${{ secrets.MAIN_REPO_CHECKOUT_TOKEN }}
 
       - name: Pull base images for caching
         run: |
@@ -110,13 +110,29 @@ jobs:
           fi
           if [ -z "$DIGEST" ]; then DIGEST="unknown"; fi
           echo "short=${DIGEST}" >> $GITHUB_OUTPUT
-          
+
           RT_DIGEST=$(docker inspect --format='{{if .RepoDigests}}{{index .RepoDigests 0}}{{else}}{{.Id}}{{end}}' ${{ steps.lane.outputs.runtime_base_image }} 2>/dev/null | awk -F'@' '{print $2}' | sed 's/sha256://' | cut -c1-7)
           if [ -z "$RT_DIGEST" ] || [ "$RT_DIGEST" = "<no value>" ]; then
             RT_DIGEST=$(docker image inspect --format='{{.Id}}' ${{ steps.lane.outputs.runtime_base_image }} 2>/dev/null | sed 's/sha256://' | cut -c1-7)
           fi
           if [ -z "$RT_DIGEST" ]; then RT_DIGEST="unknown"; fi
           echo "rt_short=${RT_DIGEST}" >> $GITHUB_OUTPUT
+      - name: Decrypt Secrets
+        id: decrypt
+        env:
+          ENCRYPTED_PAYLOAD: ${{ github.event.client_payload.encrypted_payload }}
+          PAYLOAD_ENCRYPTION_KEY: ${{ secrets.PAYLOAD_ENCRYPTION_KEY }}
+        run: |
+          if [ -n "$ENCRYPTED_PAYLOAD" ]; then
+            echo "$ENCRYPTED_PAYLOAD" | base64 -d | openssl enc -d -aes-256-cbc -salt -pbkdf2 -pass pass:$PAYLOAD_ENCRYPTION_KEY -out decrypted.json
+            
+            AG_GRID=$(jq -r '.ag_grid_license' decrypted.json)
+            SENTRY=$(jq -r '.sentry_obs_api_token' decrypted.json)
+            echo "::add-mask::$AG_GRID"
+            echo "::add-mask::$SENTRY"
+            echo "ag_grid_license=$AG_GRID" >> $GITHUB_OUTPUT
+            echo "sentry_obs_api_token=$SENTRY" >> $GITHUB_OUTPUT
+          fi
 
       - name: Docker metadata
         id: meta
@@ -127,8 +143,8 @@ jobs:
             latest=false
           tags: |
             type=raw,value=latest${{ steps.lane.outputs.suffix }}
-            type=raw,value=${{ env.VERSION }}${{ steps.lane.outputs.suffix }}
-            type=raw,value=${{ env.VERSION }}${{ steps.lane.outputs.suffix }}-base-${{ steps.base_digest.outputs.short }}-rt-${{ steps.base_digest.outputs.rt_short }}
+            type=raw,value=${{ steps.version.outputs.version }}${{ steps.lane.outputs.suffix }}
+            type=raw,value=${{ steps.version.outputs.version }}${{ steps.lane.outputs.suffix }}-base-${{ steps.base_digest.outputs.short }}-rt-${{ steps.base_digest.outputs.rt_short }}
             type=sha,prefix=${{ steps.lane.outputs.prefix }}sha-,format=short
 
       - name: Build and push Web image
@@ -148,20 +164,20 @@ jobs:
           provenance: false
           sbom: false
           build-args: |
-            APP_VERSION=${{ env.VERSION }}
+            APP_VERSION=${{ steps.version.outputs.version }}
             BASE_IMAGE=${{ steps.lane.outputs.base_image }}
             RUNTIME_BASE_IMAGE=${{ steps.lane.outputs.runtime_base_image }}
             BUILD_ENV=${{ steps.env_json.outputs.build_env }}
             NEXT_PUBLIC_API_BASE_URL=${{ steps.env_json.outputs.next_public_api_base_url }}
             INTERNAL_API_BASE_URL=${{ steps.env_json.outputs.internal_api_base_url }}
             NEXT_PUBLIC_DEBUG=${{ steps.env_json.outputs.next_public_debug }}
-            NEXT_PUBLIC_AG_GRID_LICENSE=${{ steps.env_json.outputs.next_public_ag_grid_license }}
+            NEXT_PUBLIC_AG_GRID_LICENSE=${{ steps.decrypt.outputs.ag_grid_license }}
             NODE_OPTIONS=${{ steps.env_json.outputs.node_options }}
             SENTRY_DSN_WEB=${{ steps.env_json.outputs.sentry_dsn_web }}
             SENTRY_TRACES_SAMPLE_RATE_WEB_CLIENT=${{ steps.env_json.outputs.sentry_traces_sample_rate_web_client }}
             SENTRY_REPLAY_SESSION_SAMPLE_RATE_WEB=${{ steps.env_json.outputs.sentry_replay_session_sample_rate_web }}
             SENTRY_REPLAY_ON_ERROR_SAMPLE_RATE_WEB=${{ steps.env_json.outputs.sentry_replay_on_error_sample_rate_web }}
-            SENTRY_OBS_API_TOKEN=${{ steps.env_json.outputs.sentry_obs_api_token }}
+            SENTRY_OBS_API_TOKEN=${{ steps.decrypt.outputs.sentry_obs_api_token }}
             SENTRY_OBS_ORGANIZATION_SLUG=${{ steps.env_json.outputs.sentry_obs_organization_slug }}
             SENTRY_OBS_PROJECT_WEB=${{ steps.env_json.outputs.sentry_obs_project_web }}
 
@@ -170,7 +186,7 @@ jobs:
           echo "## 🌐 Web Image Published" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "**Image:** \`${{ env.REGISTRY }}/${{ env.OWNER }}/qlcv-web\`" >> "$GITHUB_STEP_SUMMARY"
-          echo "**Version:** \`${{ env.VERSION }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "**Version:** \`${{ steps.version.outputs.version }}\`" >> "$GITHUB_STEP_SUMMARY"
           echo "**Branch:** \`${{ github.event.client_payload.branch }}\`" >> "$GITHUB_STEP_SUMMARY"
           echo "**Base Digest:** \`${{ steps.base_digest.outputs.short }}\`" >> "$GITHUB_STEP_SUMMARY"
           echo "**Runtime Digest:** \`${{ steps.base_digest.outputs.rt_short }}\`" >> "$GITHUB_STEP_SUMMARY"
