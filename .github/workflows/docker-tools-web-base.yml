@@ -136,8 +136,8 @@ jobs:
             ${{ steps.calc.outputs.latest }}
           cache-from: |
             type=registry,ref=${{ steps.calc.outputs.latest }}
-            type=gha
-          cache-to: type=gha,mode=max
+            type=gha,scope=web-base
+          cache-to: type=gha,mode=max,scope=web-base
           provenance: false
           sbom: false
 
@@ -159,8 +159,8 @@ jobs:
             ${{ steps.calc.outputs.sha_tag }}
             ${{ steps.calc.outputs.latest }}
           cache-from: |
-            type=gha
-          cache-to: type=gha,mode=max
+            type=gha,scope=web-base
+          cache-to: type=gha,mode=max,scope=web-base
           provenance: false
           sbom: false
 
@@ -180,8 +180,8 @@ jobs:
             ${{ steps.calc.outputs.sha_tag }}
             ${{ steps.calc.outputs.latest }}
           cache-from: |
-            type=gha
-          cache-to: type=gha,mode=max
+            type=gha,scope=web-base
+          cache-to: type=gha,mode=max,scope=web-base
           provenance: false
           sbom: false
 

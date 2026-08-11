@@ -98,6 +98,14 @@ jobs:
             echo "will build"
           fi
 
+          if docker manifest inspect "${{ steps.calc.outputs.latest }}" >/dev/null 2>&1; then
+            echo "use_registry_cache=true" >> $GITHUB_OUTPUT
+            echo "using latest as registry cache"
+          else
+            echo "use_registry_cache=false" >> $GITHUB_OUTPUT
+            echo "no registry cache"
+          fi
+
       - name: Set up Buildx
         if: steps.check.outputs.exists == 'false'
         uses: docker/setup-buildx-action@v4
@@ -117,8 +125,10 @@ jobs:
             ${{ steps.calc.outputs.version_tag }}
             ${{ steps.calc.outputs.sha_tag }}
             ${{ steps.calc.outputs.latest }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: |
+            type=registry,ref=${{ steps.calc.outputs.latest }}
+            type=gha,scope=api-base
+          cache-to: type=gha,mode=max,scope=api-base
           provenance: false
           sbom: false
 
@@ -135,8 +145,10 @@ jobs:
             ${{ steps.calc.outputs.version_tag }}
             ${{ steps.calc.outputs.sha_tag }}
             ${{ steps.calc.outputs.latest }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: |
+            type=registry,ref=${{ steps.calc.outputs.latest }}
+            type=gha,scope=api-base
+          cache-to: type=gha,mode=max,scope=api-base
           provenance: false
           sbom: false
 
