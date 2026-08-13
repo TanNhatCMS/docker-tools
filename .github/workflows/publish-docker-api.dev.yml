@@ -1,11 +1,15 @@
-name: Docker Publish Web Build
+name: Docker Publish API Build (Dev)
+
+# DEV variant — copy của publish-docker-api.yml kích hoạt riêng cho branch dev.
+# Khác biệt duy nhất: checkout submodules (backend nằm trong platform/server submodule).
+# Sau khi hợp nhất về main: merge 2 file lại, xóa bản .dev.yml này.
 
 on:
   repository_dispatch:
-    types: [trigger-publish-web]
+    types: [trigger-publish-api-dev]
 
 concurrency:
-  group: docker-publish-web-${{ github.event.client_payload.branch }}
+  group: publish-docker-api-dev-${{ github.event.client_payload.branch }}
   cancel-in-progress: true
 
 env:
@@ -17,8 +21,8 @@ permissions:
   packages: write
 
 jobs:
-  build-web:
-    name: Build & Push Web
+  build-api:
+    name: Build & Push API
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
@@ -50,38 +54,20 @@ jobs:
         id: lane
         run: |
           BRANCH="${{ github.event.client_payload.branch }}"
-          if [ "$BRANCH" = "main" ]; then
+          # Docker tag không cho phép '/'; branch feat/v3.0.0-dev có '/' → thay bằng '-'.
+          BRANCH_SAFE=$(echo "$BRANCH" | tr '/' '-')
+          if [ "$BRANCH_SAFE" = "main" ]; then
             echo "prefix=" >> $GITHUB_OUTPUT
             echo "suffix=" >> $GITHUB_OUTPUT
-            echo "base_image=${{ env.REGISTRY }}/${{ env.OWNER }}/qlcv-web-base:latest" >> $GITHUB_OUTPUT
-            echo "runtime_base_image=${{ env.REGISTRY }}/${{ env.OWNER }}/qlcv-web-runtime-base:latest" >> $GITHUB_OUTPUT
+            echo "base_image=${{ env.REGISTRY }}/${{ env.OWNER }}/qlcv-api-base:latest" >> $GITHUB_OUTPUT
+            echo "runtime_base_image=${{ env.REGISTRY }}/${{ env.OWNER }}/qlcv-api-runtime-base:latest" >> $GITHUB_OUTPUT
           else
-            echo "prefix=${BRANCH}-" >> $GITHUB_OUTPUT
-            echo "suffix=-${BRANCH}" >> $GITHUB_OUTPUT
-            echo "base_image=${{ env.REGISTRY }}/${{ env.OWNER }}/qlcv-web-base:latest-${BRANCH}" >> $GITHUB_OUTPUT
-            echo "runtime_base_image=${{ env.REGISTRY }}/${{ env.OWNER }}/qlcv-web-runtime-base:latest-${BRANCH}" >> $GITHUB_OUTPUT
+            echo "prefix=${BRANCH_SAFE}-" >> $GITHUB_OUTPUT
+            echo "suffix=-${BRANCH_SAFE}" >> $GITHUB_OUTPUT
+            echo "base_image=${{ env.REGISTRY }}/${{ env.OWNER }}/qlcv-api-base:latest-${BRANCH_SAFE}" >> $GITHUB_OUTPUT
+            echo "runtime_base_image=${{ env.REGISTRY }}/${{ env.OWNER }}/qlcv-api-runtime-base:latest-${BRANCH_SAFE}" >> $GITHUB_OUTPUT
           fi
           echo "Branch: $BRANCH"
-
-      - name: Parse env_json
-        id: env_json
-        run: |
-          ENV_JSON='${{ github.event.client_payload.env_json }}'
-          if [ -n "$ENV_JSON" ]; then
-            echo "build_env=$(echo "$ENV_JSON" | jq -r '.BUILD_ENV // "production"')" >> $GITHUB_OUTPUT
-            echo "next_public_api_base_url=$(echo "$ENV_JSON" | jq -r '.NEXT_PUBLIC_API_BASE_URL // ""')" >> $GITHUB_OUTPUT
-            echo "internal_api_base_url=$(echo "$ENV_JSON" | jq -r '.INTERNAL_API_BASE_URL // ""')" >> $GITHUB_OUTPUT
-            echo "next_public_debug=$(echo "$ENV_JSON" | jq -r '.NEXT_PUBLIC_DEBUG // "false"')" >> $GITHUB_OUTPUT
-            echo "next_public_ag_grid_license=$(echo "$ENV_JSON" | jq -r '.NEXT_PUBLIC_AG_GRID_LICENSE // ""')" >> $GITHUB_OUTPUT
-            echo "node_options=$(echo "$ENV_JSON" | jq -r '.NODE_OPTIONS // "--max-old-space-size=512"')" >> $GITHUB_OUTPUT
-            echo "sentry_dsn_web=$(echo "$ENV_JSON" | jq -r '.SENTRY_DSN_WEB // ""')" >> $GITHUB_OUTPUT
-            echo "sentry_traces_sample_rate_web_client=$(echo "$ENV_JSON" | jq -r '.SENTRY_TRACES_SAMPLE_RATE_WEB_CLIENT // "0.2"')" >> $GITHUB_OUTPUT
-            echo "sentry_replay_session_sample_rate_web=$(echo "$ENV_JSON" | jq -r '.SENTRY_REPLAY_SESSION_SAMPLE_RATE_WEB // "0.05"')" >> $GITHUB_OUTPUT
-            echo "sentry_replay_on_error_sample_rate_web=$(echo "$ENV_JSON" | jq -r '.SENTRY_REPLAY_ON_ERROR_SAMPLE_RATE_WEB // "1.0"')" >> $GITHUB_OUTPUT
-            echo "sentry_obs_api_token=$(echo "$ENV_JSON" | jq -r '.SENTRY_OBS_API_TOKEN // ""')" >> $GITHUB_OUTPUT
-            echo "sentry_obs_organization_slug=$(echo "$ENV_JSON" | jq -r '.SENTRY_OBS_ORGANIZATION_SLUG // ""')" >> $GITHUB_OUTPUT
-            echo "sentry_obs_project_web=$(echo "$ENV_JSON" | jq -r '.SENTRY_OBS_PROJECT_WEB // "web"')" >> $GITHUB_OUTPUT
-          fi
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
@@ -114,6 +100,7 @@ jobs:
           if [ -z "$RT_DIGEST" ] || [ "$RT_DIGEST" = "null" ]; then RT_DIGEST="unknown"; fi
           echo "Runtime Digest: $RT_DIGEST"
           echo "rt_short=${RT_DIGEST}" >> $GITHUB_OUTPUT
+
       - name: Decrypt Secrets
         id: decrypt
         env:
@@ -122,20 +109,17 @@ jobs:
         run: |
           if [ -n "$ENCRYPTED_PAYLOAD" ]; then
             echo "$ENCRYPTED_PAYLOAD" | base64 -d | openssl enc -d -aes-256-cbc -salt -pbkdf2 -pass pass:$PAYLOAD_ENCRYPTION_KEY -out decrypted.json
-            
-            AG_GRID=$(jq -r '.ag_grid_license // empty' decrypted.json)
-            SENTRY=$(jq -r '.sentry_obs_api_token // empty' decrypted.json)
-            [ -n "$AG_GRID" ] && echo "::add-mask::$AG_GRID"
-            [ -n "$SENTRY" ] && echo "::add-mask::$SENTRY"
-            echo "ag_grid_license=$AG_GRID" >> $GITHUB_OUTPUT
-            echo "sentry_obs_api_token=$SENTRY" >> $GITHUB_OUTPUT
+
+            MEDIATR=$(jq -r '.mediatr_licensekey // empty' decrypted.json)
+            [ -n "$MEDIATR" ] && echo "::add-mask::$MEDIATR"
+            echo "mediatr_licensekey=$MEDIATR" >> $GITHUB_OUTPUT
           fi
 
       - name: Docker metadata
         id: meta
         uses: docker/metadata-action@v6
         with:
-          images: ${{ env.REGISTRY }}/${{ env.OWNER }}/qlcv-web
+          images: ${{ env.REGISTRY }}/${{ env.OWNER }}/qlcv-api
           flavor: |
             latest=false
           tags: |
@@ -144,45 +128,33 @@ jobs:
             type=raw,value=${{ steps.version.outputs.version }}${{ steps.lane.outputs.suffix }}-base-${{ steps.base_digest.outputs.short }}-rt-${{ steps.base_digest.outputs.rt_short }}
             type=sha,prefix=${{ steps.lane.outputs.prefix }}sha-,format=short
 
-      - name: Build and push Web image
+      - name: Build and push API image
         id: build
         uses: docker/build-push-action@v7
         with:
           context: .
-          file: docker/nextjs/Dockerfile
+          file: docker/dotnet/Dockerfile
           platforms: linux/amd64
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: |
-            type=registry,ref=${{ env.REGISTRY }}/${{ env.OWNER }}/qlcv-web:latest${{ steps.lane.outputs.suffix }}
-            type=gha,scope=publish-web
-          cache-to: type=gha,mode=max,scope=publish-web
+            type=gha,scope=publish-api
+          cache-to: type=gha,mode=max,scope=publish-api
           provenance: false
           sbom: false
           build-args: |
             APP_VERSION=${{ steps.version.outputs.version }}
             BASE_IMAGE=${{ steps.lane.outputs.base_image }}
             RUNTIME_BASE_IMAGE=${{ steps.lane.outputs.runtime_base_image }}
-            BUILD_ENV=${{ steps.env_json.outputs.build_env }}
-            NEXT_PUBLIC_API_BASE_URL=${{ steps.env_json.outputs.next_public_api_base_url }}
-            INTERNAL_API_BASE_URL=${{ steps.env_json.outputs.internal_api_base_url }}
-            NEXT_PUBLIC_DEBUG=${{ steps.env_json.outputs.next_public_debug }}
-            NEXT_PUBLIC_AG_GRID_LICENSE=${{ steps.decrypt.outputs.ag_grid_license }}
-            NODE_OPTIONS=${{ steps.env_json.outputs.node_options }}
-            SENTRY_DSN_WEB=${{ steps.env_json.outputs.sentry_dsn_web }}
-            SENTRY_TRACES_SAMPLE_RATE_WEB_CLIENT=${{ steps.env_json.outputs.sentry_traces_sample_rate_web_client }}
-            SENTRY_REPLAY_SESSION_SAMPLE_RATE_WEB=${{ steps.env_json.outputs.sentry_replay_session_sample_rate_web }}
-            SENTRY_REPLAY_ON_ERROR_SAMPLE_RATE_WEB=${{ steps.env_json.outputs.sentry_replay_on_error_sample_rate_web }}
-            SENTRY_OBS_API_TOKEN=${{ steps.decrypt.outputs.sentry_obs_api_token }}
-            SENTRY_OBS_ORGANIZATION_SLUG=${{ steps.env_json.outputs.sentry_obs_organization_slug }}
-            SENTRY_OBS_PROJECT_WEB=${{ steps.env_json.outputs.sentry_obs_project_web }}
+            GIT_COMMIT_HASH=${{ github.event.client_payload.sha }}
+            MEDIATR__LICENSEKEY=${{ steps.decrypt.outputs.mediatr_licensekey }}
 
       - name: Summary
         run: |
-          echo "## 🌐 Web Image Published" >> "$GITHUB_STEP_SUMMARY"
+          echo "## 🐳 API Image Published (dev)" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "**Image:** \`${{ env.REGISTRY }}/${{ env.OWNER }}/qlcv-web\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "**Image:** \`${{ env.REGISTRY }}/${{ env.OWNER }}/qlcv-api\`" >> "$GITHUB_STEP_SUMMARY"
           echo "**Version:** \`${{ steps.version.outputs.version }}\`" >> "$GITHUB_STEP_SUMMARY"
           echo "**Branch:** \`${{ github.event.client_payload.branch }}\`" >> "$GITHUB_STEP_SUMMARY"
           echo "**Base Digest:** \`${{ steps.base_digest.outputs.short }}\`" >> "$GITHUB_STEP_SUMMARY"

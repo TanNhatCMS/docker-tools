@@ -1,15 +1,11 @@
-name: Docker Publish API Base Build (Dev)
-
-# DEV variant — copy của docker-tools-api-base.yml kích hoạt riêng cho branch dev.
-# Khác biệt duy nhất: checkout submodules (backend nằm trong platform/server submodule).
-# Sau khi hợp nhất về main: merge 2 file lại, xóa bản .dev.yml này.
+name: Docker Publish Web Base Build
 
 on:
   repository_dispatch:
-    types: [trigger-api-base-build-dev]
+    types: [trigger-web-base-build]
 
 concurrency:
-  group: docker-publish-api-base-dev-${{ github.event.client_payload.branch }}
+  group: publish-docker-web-base-${{ github.event.client_payload.branch }}
   cancel-in-progress: true
 
 env:
@@ -21,8 +17,8 @@ permissions:
   packages: write
 
 jobs:
-  build-base-api:
-    name: Build & Push API Base
+  build-base-web:
+    name: Build & Push Web Base
     runs-on: ubuntu-latest
     timeout-minutes: 90
     outputs:
@@ -48,18 +44,16 @@ jobs:
           else
             VERSION=$(node -p "require('./package.json').version")
           fi
-          HASH=$(cat platform/server/Directory.Build.props platform/server/Directory.Packages.props platform/server/global.json | sha256sum | cut -d' ' -f1)
-          IMAGE_NAME="${{ env.REGISTRY }}/${{ env.OWNER }}/qlcv-api-base"
+          HASH=$(sha256sum pnpm-lock.yaml | cut -d' ' -f1)
+          IMAGE_NAME="${{ env.REGISTRY }}/${{ env.OWNER }}/qlcv-web-base"
 
           BRANCH="${{ github.event.client_payload.branch }}"
-          # Docker tag không cho phép '/'; branch feat/v3.0.0-dev có '/' → thay bằng '-'.
-          BRANCH_SAFE=$(echo "$BRANCH" | tr '/' '-')
-          if [ "$BRANCH_SAFE" = "main" ]; then
+          if [ "$BRANCH" = "main" ]; then
             PREFIX=""
             SUFFIX=""
           else
-            PREFIX="${BRANCH_SAFE}-"
-            SUFFIX="-${BRANCH_SAFE}"
+            PREFIX="${BRANCH}-"
+            SUFFIX="-${BRANCH}"
           fi
 
           COMMIT_SHA=$(echo "${{ github.event.client_payload.sha }}" | cut -c1-7)
@@ -100,28 +94,37 @@ jobs:
             echo "will build"
           fi
 
+          NODE_VERSION="${{ github.event.client_payload.node_version }}"
+          if [ -z "$NODE_VERSION" ]; then
+            NODE_VERSION="24-bookworm-slim"
+          fi
+
           if docker manifest inspect "${{ steps.calc.outputs.latest }}" >/dev/null 2>&1; then
+            echo "base_image=${{ steps.calc.outputs.latest }}" >> $GITHUB_OUTPUT
             echo "use_registry_cache=true" >> $GITHUB_OUTPUT
-            echo "using latest as registry cache"
+            echo "using latest as base image and registry cache"
           else
+            echo "base_image=node:${NODE_VERSION}" >> $GITHUB_OUTPUT
             echo "use_registry_cache=false" >> $GITHUB_OUTPUT
-            echo "no registry cache"
+            echo "using node:${NODE_VERSION} as base image (no registry cache)"
           fi
 
       - name: Set up Buildx
         if: steps.check.outputs.exists == 'false'
         uses: docker/setup-buildx-action@v4
 
-      - name: Build & push
-        id: build
-        if: steps.check.outputs.exists == 'false'
+      - name: Build & push (with registry cache)
+        id: build_registry
+        if: steps.check.outputs.exists == 'false' && steps.check.outputs.use_registry_cache == 'true'
         uses: docker/build-push-action@v7
         continue-on-error: true
         with:
           context: .
-          file: docker/dotnet/Dockerfile.base
+          file: docker/nextjs/Dockerfile.base
           platforms: linux/amd64
           push: true
+          build-args: |
+            BASE_IMAGE=${{ steps.check.outputs.base_image }}
           tags: |
             ${{ steps.calc.outputs.tag }}
             ${{ steps.calc.outputs.version_tag }}
@@ -129,34 +132,58 @@ jobs:
             ${{ steps.calc.outputs.latest }}
           cache-from: |
             type=registry,ref=${{ steps.calc.outputs.latest }}
-            type=gha,scope=api-base
-          cache-to: type=gha,mode=max,scope=api-base
+            type=gha,scope=web-base
+          cache-to: type=gha,mode=max,scope=web-base
+          provenance: false
+          sbom: false
+
+      - name: Build & push (no registry cache)
+        id: build_no_registry
+        if: steps.check.outputs.exists == 'false' && steps.check.outputs.use_registry_cache == 'false'
+        uses: docker/build-push-action@v7
+        continue-on-error: true
+        with:
+          context: .
+          file: docker/nextjs/Dockerfile.base
+          platforms: linux/amd64
+          push: true
+          build-args: |
+            BASE_IMAGE=${{ steps.check.outputs.base_image }}
+          tags: |
+            ${{ steps.calc.outputs.tag }}
+            ${{ steps.calc.outputs.version_tag }}
+            ${{ steps.calc.outputs.sha_tag }}
+            ${{ steps.calc.outputs.latest }}
+          cache-from: |
+            type=gha,scope=web-base
+          cache-to: type=gha,mode=max,scope=web-base
           provenance: false
           sbom: false
 
       - name: Retry build if failed
-        if: steps.build.outcome == 'failure'
+        if: steps.build_registry.outcome == 'failure' || steps.build_no_registry.outcome == 'failure'
         uses: docker/build-push-action@v7
         with:
           context: .
-          file: docker/dotnet/Dockerfile.base
+          file: docker/nextjs/Dockerfile.base
           platforms: linux/amd64
           push: true
+          build-args: |
+            BASE_IMAGE=${{ steps.check.outputs.base_image }}
           tags: |
             ${{ steps.calc.outputs.tag }}
             ${{ steps.calc.outputs.version_tag }}
             ${{ steps.calc.outputs.sha_tag }}
             ${{ steps.calc.outputs.latest }}
           cache-from: |
-            type=registry,ref=${{ steps.calc.outputs.latest }}
-            type=gha,scope=api-base
-          cache-to: type=gha,mode=max,scope=api-base
+            type=gha,scope=web-base
+          cache-to: type=gha,mode=max,scope=web-base
           provenance: false
           sbom: false
 
       - name: Summary
         run: |
-          echo "## 📦 docker-tools API base (dev)" >> "$GITHUB_STEP_SUMMARY"
+          echo "## 📦 docker-tools base" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "- **Version:** \`${{ steps.calc.outputs.version }}\`" >> "$GITHUB_STEP_SUMMARY"
           echo "- **Image:** \`${{ steps.calc.outputs.tag }}\`" >> "$GITHUB_STEP_SUMMARY"

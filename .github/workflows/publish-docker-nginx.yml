@@ -1,27 +1,48 @@
-name: Docker Publish Migrator Build
+name: Docker Publish Nginx Build
 
 on:
   repository_dispatch:
-    types: [trigger-publish-migrator]
+    types: [trigger-publish-nginx]
 
 concurrency:
-  group: docker-publish-migrator-${{ github.event.client_payload.branch }}
+  group: publish-docker-nginx-${{ github.event.client_payload.branch }}
   cancel-in-progress: true
 
 env:
   REGISTRY: ghcr.io
   OWNER: tannhatcms
-  IMAGE_NAME: qlcv-db-migrator
 
 permissions:
   contents: read
   packages: write
 
 jobs:
-  build-migrator:
-    name: Build & Push DB Migrator
+  resolve-lanes:
+    name: Resolve lanes
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    outputs:
+      lanes: ${{ steps.resolve.outputs.lanes }}
+    steps:
+      - name: Resolve lanes theo branch
+        id: resolve
+        run: |
+          BRANCH="${{ github.event.client_payload.branch }}"
+          if [ "$BRANCH" = "main" ]; then
+            echo 'lanes=["prod","staging"]' >> $GITHUB_OUTPUT
+          else
+            echo 'lanes=["dev"]' >> $GITHUB_OUTPUT
+          fi
+          echo "Branch: $BRANCH"
+
+  build-nginx:
+    name: Build & Push Nginx (${{ matrix.lane }})
+    needs: resolve-lanes
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        lane: ${{ fromJson(needs.resolve-lanes.outputs.lanes) }}
 
     steps:
       - name: Checkout Main Repository
@@ -47,15 +68,29 @@ jobs:
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "Resolved version: $VERSION"
 
+      - name: Resolve tag prefix
+        id: prefix
+        run: |
+          LANE="${{ matrix.lane }}"
+          if [ "$LANE" = "prod" ]; then
+            echo "prefix=" >> $GITHUB_OUTPUT
+            echo "suffix=" >> $GITHUB_OUTPUT
+          else
+            echo "prefix=${LANE}-" >> $GITHUB_OUTPUT
+            echo "suffix=-${LANE}" >> $GITHUB_OUTPUT
+          fi
+
       - name: Docker metadata
         id: meta
         uses: docker/metadata-action@v6
         with:
-          images: ${{ env.REGISTRY }}/${{ env.OWNER }}/${{ env.IMAGE_NAME }}
+          images: ${{ env.REGISTRY }}/${{ env.OWNER }}/qlcv-nginx
+          flavor: |
+            latest=false
           tags: |
-            type=raw,value=latest,enable=${{ github.event.client_payload.branch == 'main' }}
-            type=raw,value=${{ steps.version.outputs.version }}
-            type=sha,prefix=sha-,format=short
+            type=raw,value=latest${{ steps.prefix.outputs.suffix }}
+            type=raw,value=${{ steps.version.outputs.version }}${{ steps.prefix.outputs.suffix }}
+            type=sha,prefix=${{ steps.prefix.outputs.prefix }}sha-,format=short
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
@@ -67,31 +102,34 @@ jobs:
           username: ${{ env.OWNER }}
           password: ${{ secrets.MAIN_REPO_CHECKOUT_TOKEN }}
 
-      - name: Build and push migrator image
+      - name: Build and push Nginx image
         id: build
         uses: docker/build-push-action@v7
         with:
           context: .
-          file: docker/db-migrator/Dockerfile
-          platforms: linux/amd64,linux/arm64
+          file: docker/nginx/Dockerfile
+          platforms: linux/amd64
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: |
-            type=registry,ref=${{ env.REGISTRY }}/${{ env.OWNER }}/${{ env.IMAGE_NAME }}:latest
-            type=gha,scope=publish-migrator
-          cache-to: type=gha,mode=max,scope=publish-migrator
+            type=registry,ref=${{ env.REGISTRY }}/${{ env.OWNER }}/qlcv-nginx:latest${{ steps.prefix.outputs.suffix }}
+            type=gha,scope=nginx-${{ matrix.lane }}
+          cache-to: type=gha,mode=max,scope=nginx-${{ matrix.lane }}
           provenance: false
           sbom: false
           build-args: |
             APP_VERSION=${{ steps.version.outputs.version }}
+            NGINX_ENV=${{ matrix.lane }}
 
       - name: Summary
         run: |
-          echo "## 🐳 DB Migrator Image Published" >> "$GITHUB_STEP_SUMMARY"
+          echo "## 🔧 Nginx Image Published (${{ matrix.lane }})" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "**Image:** \`${{ env.REGISTRY }}/${{ env.OWNER }}/${{ env.IMAGE_NAME }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "**Image:** \`${{ env.REGISTRY }}/${{ env.OWNER }}/qlcv-nginx\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "**Lane:** \`${{ matrix.lane }}\`" >> "$GITHUB_STEP_SUMMARY"
           echo "**Version:** \`${{ steps.version.outputs.version }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "**Branch:** \`${{ github.event.client_payload.branch }}\`" >> "$GITHUB_STEP_SUMMARY"
           echo "**Digest:** \`${{ steps.build.outputs.digest }}\`" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "### Tags" >> "$GITHUB_STEP_SUMMARY"

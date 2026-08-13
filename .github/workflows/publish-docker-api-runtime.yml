@@ -1,16 +1,11 @@
-name: Docker Publish API Runtime Build (Dev)
-
-# DEV variant — kích hoạt riêng cho branch feat/v3.0.0-dev.
-# Build runtime base image (Dockerfile.runtime.base) cho lane dev,
-# cần thiết để publish-api.dev build Dockerfile.
-# Sau khi hợp nhất về main: merge vào file gốc, xóa bản .dev.yml.
+name: Docker Publish API Runtime Build
 
 on:
   repository_dispatch:
-    types: [trigger-api-runtime-build-dev]
+    types: [trigger-api-runtime-build]
 
 concurrency:
-  group: docker-publish-api-runtime-dev-${{ github.event.client_payload.branch }}
+  group: publish-docker-api-runtime-${{ github.event.client_payload.branch }}
   cancel-in-progress: true
 
 env:
@@ -49,14 +44,12 @@ jobs:
 
           BRANCH="${{ github.event.client_payload.branch }}"
           IMAGE_NAME="${{ env.REGISTRY }}/${{ env.OWNER }}/qlcv-api-runtime-base"
-          # Docker tag không cho phép '/'; branch feat/v3.0.0-dev có '/' → thay bằng '-'.
-          BRANCH_SAFE=$(echo "$BRANCH" | tr '/' '-')
-          if [ "$BRANCH_SAFE" = "main" ]; then
+          if [ "$BRANCH" = "main" ]; then
             PREFIX=""
             SUFFIX=""
           else
-            PREFIX="${BRANCH_SAFE}-"
-            SUFFIX="-${BRANCH_SAFE}"
+            PREFIX="${BRANCH}-"
+            SUFFIX="-${BRANCH}"
           fi
 
           COMMIT_SHA=$(echo "${{ github.event.client_payload.sha }}" | cut -c1-7)
@@ -104,7 +97,7 @@ jobs:
 
       - name: Summary
         run: |
-          echo "## 🚀 API Runtime Base Published (dev)" >> "$GITHUB_STEP_SUMMARY"
+          echo "## 🚀 API Runtime Base Published" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "- **Version:** \`${{ steps.tags.outputs.version }}\`" >> "$GITHUB_STEP_SUMMARY"
           echo "- **Image:** \`${{ steps.tags.outputs.tag }}\`" >> "$GITHUB_STEP_SUMMARY"

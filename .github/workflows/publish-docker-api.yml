@@ -5,7 +5,7 @@ on:
     types: [trigger-publish-api]
 
 concurrency:
-  group: docker-publish-api-${{ github.event.client_payload.branch }}
+  group: publish-docker-api-${{ github.event.client_payload.branch }}
   cancel-in-progress: true
 
 env:

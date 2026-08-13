@@ -5,7 +5,7 @@ on:
     types: [trigger-web-runtime-build]
 
 concurrency:
-  group: docker-publish-web-runtime-${{ github.event.client_payload.branch }}
+  group: publish-docker-web-runtime-${{ github.event.client_payload.branch }}
   cancel-in-progress: true
 
 env:
