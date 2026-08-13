@@ -1,17 +1,16 @@
-name: Docker Tools Web Runtime Build
+name: Docker Publish Web Runtime Build
 
 on:
   repository_dispatch:
     types: [trigger-web-runtime-build]
 
 concurrency:
-  group: docker-tools-web-runtime-${{ github.event.client_payload.branch }}
+  group: docker-publish-web-runtime-${{ github.event.client_payload.branch }}
   cancel-in-progress: true
 
 env:
   REGISTRY: ghcr.io
   OWNER: tannhatcms
-  PUBLIC_REPO: docker-tools-web-runtime
 
 permissions:
   contents: read
@@ -28,13 +27,10 @@ jobs:
         uses: actions/checkout@v7
         with:
           repository: TanNhatCMS/QuanLyCongViec
-          ref: ${{ github.event.client_payload.branch }}
+          ref: ${{ github.event.client_payload.sha }}
           fetch-depth: 0
           token: ${{ secrets.MAIN_REPO_CHECKOUT_TOKEN }}
-
-      - name: Checkout exact commit SHA
-        run: |
-          git checkout ${{ github.event.client_payload.sha }}
+          submodules: true
 
       - name: Resolve lane tags
         id: tags

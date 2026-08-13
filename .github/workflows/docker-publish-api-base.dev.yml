@@ -1,11 +1,15 @@
-name: Docker Tools API Base Build
+name: Docker Publish API Base Build (Dev)
+
+# DEV variant — copy của docker-tools-api-base.yml kích hoạt riêng cho branch dev.
+# Khác biệt duy nhất: checkout submodules (backend nằm trong platform/server submodule).
+# Sau khi hợp nhất về main: merge 2 file lại, xóa bản .dev.yml này.
 
 on:
   repository_dispatch:
-    types: [trigger-api-base-build]
+    types: [trigger-api-base-build-dev]
 
 concurrency:
-  group: docker-tools-api-base-${{ github.event.client_payload.branch }}
+  group: docker-publish-api-base-dev-${{ github.event.client_payload.branch }}
   cancel-in-progress: true
 
 env:
@@ -31,13 +35,10 @@ jobs:
         uses: actions/checkout@v7
         with:
           repository: TanNhatCMS/QuanLyCongViec
-          ref: ${{ github.event.client_payload.branch }}
+          ref: ${{ github.event.client_payload.sha }}
           fetch-depth: 0
           token: ${{ secrets.MAIN_REPO_CHECKOUT_TOKEN }}
-
-      - name: Checkout exact commit SHA
-        run: |
-          git checkout ${{ github.event.client_payload.sha }}
+          submodules: true
 
       - name: Calculate tag
         id: calc
@@ -51,12 +52,14 @@ jobs:
           IMAGE_NAME="${{ env.REGISTRY }}/${{ env.OWNER }}/qlcv-api-base"
 
           BRANCH="${{ github.event.client_payload.branch }}"
-          if [ "$BRANCH" = "main" ]; then
+          # Docker tag không cho phép '/'; branch feat/v3.0.0-dev có '/' → thay bằng '-'.
+          BRANCH_SAFE=$(echo "$BRANCH" | tr '/' '-')
+          if [ "$BRANCH_SAFE" = "main" ]; then
             PREFIX=""
             SUFFIX=""
           else
-            PREFIX="${BRANCH}-"
-            SUFFIX="-${BRANCH}"
+            PREFIX="${BRANCH_SAFE}-"
+            SUFFIX="-${BRANCH_SAFE}"
           fi
 
           COMMIT_SHA=$(echo "${{ github.event.client_payload.sha }}" | cut -c1-7)
@@ -153,7 +156,7 @@ jobs:
 
       - name: Summary
         run: |
-          echo "## 📦 docker-tools API base" >> "$GITHUB_STEP_SUMMARY"
+          echo "## 📦 docker-tools API base (dev)" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "- **Version:** \`${{ steps.calc.outputs.version }}\`" >> "$GITHUB_STEP_SUMMARY"
           echo "- **Image:** \`${{ steps.calc.outputs.tag }}\`" >> "$GITHUB_STEP_SUMMARY"
