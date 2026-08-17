@@ -23,25 +23,38 @@ jobs:
     timeout-minutes: 30
 
     steps:
-      - name: Checkout Main Repository
+      - name: Checkout Server Repository
         uses: actions/checkout@v7
         with:
-          repository: TanNhatCMS/QuanLyCongViec
+          repository: phu-nam-hai-jsco/quan-ly-cong-viec-server
           ref: ${{ github.event.client_payload.sha }}
           fetch-depth: 0
           token: ${{ secrets.MAIN_REPO_CHECKOUT_TOKEN }}
-          submodules: true
 
       - name: Resolve version
         id: version
         run: |
+          RAW_VERSION=""
           if [ -n "${{ github.event.client_payload.version }}" ]; then
-            VERSION="${{ github.event.client_payload.version }}"
+            RAW_VERSION="${{ github.event.client_payload.version }}"
             echo "Source: client_payload"
-          else
-            VERSION=$(node -p "require('./package.json').version" 2>/dev/null || echo "dev")
-            echo "Source: package.json"
+          elif [ -f "version.build.yml" ]; then
+            RAW_VERSION=$(grep -E '^[[:space:]]*version:' version.build.yml | head -n1 | sed -E 's/^[[:space:]]*version:[[:space:]]*["'\'']?([^"'\'']+)["'\'']?/\1/' | tr -d '[:space:]')
+            echo "Source: version.build.yml"
+          elif [ -f "build/api.build.yml" ]; then
+            RAW_VERSION=$(grep -E '^[[:space:]]*version:' build/api.build.yml | head -n1 | sed -E 's/^[[:space:]]*version:[[:space:]]*["'\'']?([^"'\'']+)["'\'']?/\1/' | tr -d '[:space:]')
+            echo "Source: build/api.build.yml"
           fi
+
+          # Chuẩn hóa version: bỏ 'v' ở đầu nếu có (vd: v2.9.6 -> 2.9.6)
+          VERSION=$(echo "$RAW_VERSION" | sed -E 's/^v//')
+
+          # Nếu rỗng hoặc không đúng định dạng SemVer/version .NET (vd: chỉ là chữ 'dev'), fallback về 1.0.0-dev
+          if [ -z "$VERSION" ] || ! echo "$VERSION" | grep -qE '^[0-9]+(\.[0-9]+)*'; then
+            VERSION="1.0.0-dev"
+            echo "Version normalized to valid SemVer: $VERSION"
+          fi
+
           echo "VERSION=$VERSION" >> $GITHUB_ENV
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "Resolved version: $VERSION"
@@ -53,14 +66,12 @@ jobs:
           if [ "$BRANCH" = "main" ]; then
             echo "prefix=" >> $GITHUB_OUTPUT
             echo "suffix=" >> $GITHUB_OUTPUT
-            echo "base_image=${{ env.REGISTRY }}/${{ env.OWNER }}/qlcv-api-base:latest" >> $GITHUB_OUTPUT
-            echo "runtime_base_image=${{ env.REGISTRY }}/${{ env.OWNER }}/qlcv-api-runtime-base:latest" >> $GITHUB_OUTPUT
           else
             echo "prefix=${BRANCH}-" >> $GITHUB_OUTPUT
             echo "suffix=-${BRANCH}" >> $GITHUB_OUTPUT
-            echo "base_image=${{ env.REGISTRY }}/${{ env.OWNER }}/qlcv-api-base:latest-${BRANCH}" >> $GITHUB_OUTPUT
-            echo "runtime_base_image=${{ env.REGISTRY }}/${{ env.OWNER }}/qlcv-api-runtime-base:latest-${BRANCH}" >> $GITHUB_OUTPUT
           fi
+          echo "base_image=${{ env.REGISTRY }}/${{ env.OWNER }}/qlcv-api-base:latest" >> $GITHUB_OUTPUT
+          echo "runtime_base_image=${{ env.REGISTRY }}/${{ env.OWNER }}/qlcv-api-runtime-base:latest" >> $GITHUB_OUTPUT
           echo "Branch: $BRANCH"
 
       - name: Set up Docker Buildx
@@ -126,7 +137,7 @@ jobs:
         uses: docker/build-push-action@v7
         with:
           context: .
-          file: docker/dotnet/Dockerfile
+          file: docker/Dockerfile
           platforms: linux/amd64
           push: true
           tags: ${{ steps.meta.outputs.tags }}
