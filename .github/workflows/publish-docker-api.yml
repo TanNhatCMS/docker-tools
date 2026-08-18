@@ -27,7 +27,7 @@ jobs:
         uses: actions/checkout@v7
         with:
           repository: phu-nam-hai-jsco/quan-ly-cong-viec-server
-          ref: ${{ github.event.client_payload.branch || 'main' }}
+          ref: 'main' #ref: ${{ github.event.client_payload.branch || 'main' }}
           fetch-depth: 0
           token: ${{ secrets.MAIN_REPO_CHECKOUT_TOKEN }}
 
