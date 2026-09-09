@@ -53,13 +53,9 @@ jobs:
           if [ "$BRANCH" = "main" ]; then
             echo "prefix=" >> $GITHUB_OUTPUT
             echo "suffix=" >> $GITHUB_OUTPUT
-            echo "base_image=${{ env.REGISTRY }}/${{ env.OWNER }}/qlcv-web-base:latest" >> $GITHUB_OUTPUT
-            echo "runtime_base_image=${{ env.REGISTRY }}/${{ env.OWNER }}/qlcv-web-runtime-base:latest" >> $GITHUB_OUTPUT
           else
             echo "prefix=${BRANCH}-" >> $GITHUB_OUTPUT
             echo "suffix=-${BRANCH}" >> $GITHUB_OUTPUT
-            echo "base_image=${{ env.REGISTRY }}/${{ env.OWNER }}/qlcv-web-base:latest-${BRANCH}" >> $GITHUB_OUTPUT
-            echo "runtime_base_image=${{ env.REGISTRY }}/${{ env.OWNER }}/qlcv-web-runtime-base:latest-${BRANCH}" >> $GITHUB_OUTPUT
           fi
           echo "Branch: $BRANCH"
 
@@ -73,7 +69,6 @@ jobs:
             echo "internal_api_base_url=$(echo "$ENV_JSON" | jq -r '.INTERNAL_API_BASE_URL // ""')" >> $GITHUB_OUTPUT
             echo "next_public_debug=$(echo "$ENV_JSON" | jq -r '.NEXT_PUBLIC_DEBUG // "false"')" >> $GITHUB_OUTPUT
             echo "next_public_ag_grid_license=$(echo "$ENV_JSON" | jq -r '.NEXT_PUBLIC_AG_GRID_LICENSE // ""')" >> $GITHUB_OUTPUT
-            echo "node_options=$(echo "$ENV_JSON" | jq -r '.NODE_OPTIONS // "--max-old-space-size=512"')" >> $GITHUB_OUTPUT
             echo "sentry_dsn_web=$(echo "$ENV_JSON" | jq -r '.SENTRY_DSN_WEB // ""')" >> $GITHUB_OUTPUT
             echo "sentry_traces_sample_rate_web_client=$(echo "$ENV_JSON" | jq -r '.SENTRY_TRACES_SAMPLE_RATE_WEB_CLIENT // "0.2"')" >> $GITHUB_OUTPUT
             echo "sentry_replay_session_sample_rate_web=$(echo "$ENV_JSON" | jq -r '.SENTRY_REPLAY_SESSION_SAMPLE_RATE_WEB // "0.05"')" >> $GITHUB_OUTPUT
@@ -93,27 +88,6 @@ jobs:
           username: ${{ env.OWNER }}
           password: ${{ secrets.MAIN_REPO_CHECKOUT_TOKEN }}
 
-      - name: Pull base images for caching
-        run: |
-          docker pull ${{ steps.lane.outputs.base_image }} || true
-          docker pull ${{ steps.lane.outputs.runtime_base_image }} || true
-
-      - name: Extract Base Image Digest
-        id: base_digest
-        run: |
-          RAW_DIGEST=$(docker image inspect ${{ steps.lane.outputs.base_image }} 2>/dev/null | jq -r '.[0].RepoDigests[0] // .[0].Id' 2>/dev/null || echo "")
-          DIGEST=${RAW_DIGEST#*sha256:}
-          DIGEST=${DIGEST:0:7}
-          if [ -z "$DIGEST" ] || [ "$DIGEST" = "null" ]; then DIGEST="unknown"; fi
-          echo "Base Digest: $DIGEST"
-          echo "short=${DIGEST}" >> $GITHUB_OUTPUT
-
-          RAW_RT=$(docker image inspect ${{ steps.lane.outputs.runtime_base_image }} 2>/dev/null | jq -r '.[0].RepoDigests[0] // .[0].Id' 2>/dev/null || echo "")
-          RT_DIGEST=${RAW_RT#*sha256:}
-          RT_DIGEST=${RT_DIGEST:0:7}
-          if [ -z "$RT_DIGEST" ] || [ "$RT_DIGEST" = "null" ]; then RT_DIGEST="unknown"; fi
-          echo "Runtime Digest: $RT_DIGEST"
-          echo "rt_short=${RT_DIGEST}" >> $GITHUB_OUTPUT
       - name: Decrypt Secrets
         id: decrypt
         env:
@@ -122,7 +96,7 @@ jobs:
         run: |
           if [ -n "$ENCRYPTED_PAYLOAD" ]; then
             echo "$ENCRYPTED_PAYLOAD" | base64 -d | openssl enc -d -aes-256-cbc -salt -pbkdf2 -pass pass:$PAYLOAD_ENCRYPTION_KEY -out decrypted.json
-            
+
             AG_GRID=$(jq -r '.ag_grid_license // empty' decrypted.json)
             SENTRY=$(jq -r '.sentry_obs_api_token // empty' decrypted.json)
             [ -n "$AG_GRID" ] && echo "::add-mask::$AG_GRID"
@@ -141,7 +115,6 @@ jobs:
           tags: |
             type=raw,value=latest${{ steps.lane.outputs.suffix }}
             type=raw,value=${{ steps.version.outputs.version }}${{ steps.lane.outputs.suffix }}
-            type=raw,value=${{ steps.version.outputs.version }}${{ steps.lane.outputs.suffix }}-base-${{ steps.base_digest.outputs.short }}-rt-${{ steps.base_digest.outputs.rt_short }}
             type=sha,prefix=${{ steps.lane.outputs.prefix }}sha-,format=short
 
       - name: Build and push Web image
@@ -154,22 +127,22 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          # Layer deps (pnpm install) được giữ cache qua registry buildcache + gha
+          # để không phải reinstall khi pnpm-lock.yaml không đổi.
           cache-from: |
-            type=registry,ref=${{ env.REGISTRY }}/${{ env.OWNER }}/qlcv-web:latest${{ steps.lane.outputs.suffix }}
-            type=gha,scope=publish-web
-          cache-to: type=gha,mode=max,scope=publish-web
+            type=registry,ref=${{ env.REGISTRY }}/${{ env.OWNER }}/qlcv-web:buildcache${{ steps.lane.outputs.suffix }}
+            type=gha,mode=max,scope=publish-web
+          cache-to: |
+            type=registry,ref=${{ env.REGISTRY }}/${{ env.OWNER }}/qlcv-web:buildcache${{ steps.lane.outputs.suffix }},mode=max
+            type=gha,mode=max,scope=publish-web
           provenance: false
           sbom: false
           build-args: |
             APP_VERSION=${{ steps.version.outputs.version }}
-            BASE_IMAGE=${{ steps.lane.outputs.base_image }}
-            RUNTIME_BASE_IMAGE=${{ steps.lane.outputs.runtime_base_image }}
             BUILD_ENV=${{ steps.env_json.outputs.build_env }}
             NEXT_PUBLIC_API_BASE_URL=${{ steps.env_json.outputs.next_public_api_base_url }}
             INTERNAL_API_BASE_URL=${{ steps.env_json.outputs.internal_api_base_url }}
             NEXT_PUBLIC_DEBUG=${{ steps.env_json.outputs.next_public_debug }}
-            NEXT_PUBLIC_AG_GRID_LICENSE=${{ steps.decrypt.outputs.ag_grid_license }}
-            NODE_OPTIONS=${{ steps.env_json.outputs.node_options }}
             SENTRY_DSN_WEB=${{ steps.env_json.outputs.sentry_dsn_web }}
             SENTRY_TRACES_SAMPLE_RATE_WEB_CLIENT=${{ steps.env_json.outputs.sentry_traces_sample_rate_web_client }}
             SENTRY_REPLAY_SESSION_SAMPLE_RATE_WEB=${{ steps.env_json.outputs.sentry_replay_session_sample_rate_web }}
@@ -185,8 +158,6 @@ jobs:
           echo "**Image:** \`${{ env.REGISTRY }}/${{ env.OWNER }}/qlcv-web\`" >> "$GITHUB_STEP_SUMMARY"
           echo "**Version:** \`${{ steps.version.outputs.version }}\`" >> "$GITHUB_STEP_SUMMARY"
           echo "**Branch:** \`${{ github.event.client_payload.branch }}\`" >> "$GITHUB_STEP_SUMMARY"
-          echo "**Base Digest:** \`${{ steps.base_digest.outputs.short }}\`" >> "$GITHUB_STEP_SUMMARY"
-          echo "**Runtime Digest:** \`${{ steps.base_digest.outputs.rt_short }}\`" >> "$GITHUB_STEP_SUMMARY"
           echo "**Digest:** \`${{ steps.build.outputs.digest }}\`" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "### Tags" >> "$GITHUB_STEP_SUMMARY"

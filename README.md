@@ -1,34 +1,31 @@
 # docker-tools
 
-Sub-repo chứa public base images cho **QuanLyCongViec**.
-
-## 📦 Public Images
-
-| Image                             | Tag                         | Mô tả                           |
-| --------------------------------- | --------------------------- | ------------------------------- |
-| `ghcr.io/tannhatcms/docker-tools` | `qlcv-web-base-deps-{hash}` | Pre-built pnpm + workspace deps |
-| `ghcr.io/tannhatcms/docker-tools` | `qlcv-web-base-latest`      | Pointer tới base mới nhất       |
-
-## 🚀 Quick Start
-
-```bash
-# Pull base
-docker pull ghcr.io/tannhatcms/docker-tools:qlcv-web-base-latest
-
-# Build full web image dùng base
-docker build -f docker/nextjs/Dockerfile \
-  --build-arg BASE_IMAGE=ghcr.io/tannhatcms/docker-tools:qlcv-web-base-latest \
-  -t qlcv-web:dev .
-```
+Sub-repo chứa các workflow build & publish Docker images cho **QuanLyCongViec** lên GHCR
+(`ghcr.io/tannhatcms/*`). Main repo chỉ gửi `repository_dispatch` kèm payload đã mã hoá;
+build thực tế chạy tại đây (dùng secrets `MAIN_REPO_CHECKOUT_TOKEN`, `PAYLOAD_ENCRYPTION_KEY`).
 
 ## 🔧 Workflows
 
-| Workflow                                   | Trigger                                      | Output                                                             |
-| ------------------------------------------ | -------------------------------------------- | ------------------------------------------------------------------ |
-| `.github/workflows/docker-tools.yml`       | push to `main` (deps changed) hoặc manual    | base image → `docker-tools` package                                |
-| `.github/workflows/docker-publish-web.yml` | push to `main` (version changed) hoặc manual | web image → `quan-ly-cong-viec-web` (pulls base từ `docker-tools`) |
+| Workflow                         | Trigger                             | Output                                                        |
+| -------------------------------- | ----------------------------------- | ------------------------------------------------------------- |
+| `publish-docker-web.yml`         | `repository_dispatch` (web)         | `qlcv-web` — build all-in-one (deps → builder → nginx runner) |
+| `publish-docker-api.yml`         | `repository_dispatch` (api)         | `qlcv-api`                                                    |
+| `publish-docker-api-base.yml`    | `repository_dispatch` (api-base)    | `qlcv-api-base` (NuGet restore cache)                         |
+| `publish-docker-api-runtime.yml` | `repository_dispatch` (api-runtime) | `qlcv-api-runtime-base`                                       |
+| `publish-docker-nginx.yml`       | `repository_dispatch` (nginx)       | `qlcv-nginx`                                                  |
+| `publish-docker-migrator.yml`    | `repository_dispatch` (migrator)    | `qlcv-db-migrator`                                            |
 
-## 📝 Tại sao tách riêng?
+## 🌐 Web — all-in-one
 
-- **Cache reuse** cross-repo.
-- **Tách triggers:** deps đổi → rebuild base. Source đổi → rebuild web.
+Web build gộp trong **một** workflow + **một** Dockerfile (`docker/nextjs/Dockerfile`
+ở main repo): stage `deps` (pnpm install) → `builder` (Next.js static export) →
+`runner` (nginx). Không còn image trung gian `qlcv-web-base` / `qlcv-web-runtime-base`.
+
+- Base: `node:26-bookworm-slim` (+ `libatomic1` — node 26 cần libatomic để chạy lifecycle scripts).
+- Layer deps được cache qua registry tag `qlcv-web:buildcache[-lane]` + gha cache:
+  chỉ `pnpm install` lại khi `pnpm-lock.yaml` đổi.
+
+```bash
+# Build local tương đương
+docker buildx build -f docker/nextjs/Dockerfile -t qlcv-web:dev .
+```
