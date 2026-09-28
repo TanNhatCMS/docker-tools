@@ -286,3 +286,15 @@ jobs:
             -f state="$STATE" -f target_url="$RUN_URL" \
             -f description="$STATUS_CONTEXT $STATE" -f context="$STATUS_CONTEXT" --silent \
             || echo "::warning::Không thể set final status trên $MAIN_REPO@$HEAD_SHA"
+
+      # Lệnh đến từ comment trên PR (ci-dispatcher): thả 👍/👎 vào chính comment đó khi test kết thúc
+      - name: React to command comment
+        if: always() && github.event.client_payload.comment_id != ''
+        env:
+          GH_TOKEN: ${{ secrets.MAIN_REPO_PR_TOKEN || secrets.MAIN_REPO_CHECKOUT_TOKEN }}
+          COMMENT_ID: ${{ github.event.client_payload.comment_id }}
+          REACTION: ${{ job.status == 'success' && '+1' || '-1' }}
+        run: |
+          gh api "repos/$MAIN_REPO/issues/comments/$COMMENT_ID/reactions" \
+            -f content="$REACTION" --silent \
+            || echo "::warning::Không thể thả reaction $REACTION vào comment $COMMENT_ID trên $MAIN_REPO"
