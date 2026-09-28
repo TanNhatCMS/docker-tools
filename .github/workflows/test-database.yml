@@ -60,6 +60,29 @@ jobs:
             -f description="Migration & Seed Test in progress..." -f context="$STATUS_CONTEXT" --silent \
             || echo "::warning::Không thể set pending status trên $MAIN_REPO@$HEAD_SHA"
 
+      # Lệnh từ comment `$test-*`: báo main repo docker-tools đã bắt đầu chạy → test-report.yml thả 🚀
+      - name: Notify started
+        if: env.PR_NUMBER != '' && github.event.client_payload.comment_id != ''
+        continue-on-error: true
+        uses: actions/github-script@v9
+        env:
+          COMMENT_ID: ${{ github.event.client_payload.comment_id }}
+        with:
+          github-token: ${{ secrets.MAIN_REPO_PR_TOKEN || secrets.MAIN_REPO_CHECKOUT_TOKEN }}
+          script: |
+            await github.rest.repos.createDispatchEvent({
+              owner: 'TanNhatCMS',
+              repo: 'QuanLyCongViec',
+              event_type: 'test-report',
+              client_payload: {
+                stage: 'started',
+                pr_number: process.env.PR_NUMBER,
+                comment_id: process.env.COMMENT_ID,
+                header: 'database-test',
+                run_url: process.env.RUN_URL,
+              },
+            });
+
       - name: Checkout Main Repository
         uses: actions/checkout@v7
         with:
@@ -297,11 +320,27 @@ jobs:
               repo: 'QuanLyCongViec',
               event_type: 'test-report',
               client_payload: {
+                stage: 'completed',
                 pr_number: process.env.PR_NUMBER,
                 comment_id: process.env.COMMENT_ID || '',
                 header: 'database-test',
                 conclusion: process.env.CONCLUSION,
+                run_url: process.env.RUN_URL,
                 body,
               },
             });
+
+            // Summary: link bấm được tới PR và thẳng tới comment lệnh
+            const prUrl = `https://github.com/TanNhatCMS/QuanLyCongViec/pull/${process.env.PR_NUMBER}`;
+            const rows = [
+              [{ data: 'PR', header: true }, { data: 'Comment lệnh', header: true }, { data: 'Kết quả', header: true }],
+              [
+                `<a href="${prUrl}">TanNhatCMS/QuanLyCongViec#${process.env.PR_NUMBER}</a>`,
+                process.env.COMMENT_ID
+                  ? `<a href="${prUrl}#issuecomment-${process.env.COMMENT_ID}">#issuecomment-${process.env.COMMENT_ID}</a>`
+                  : '— (chạy tự động, sticky comment)',
+                process.env.CONCLUSION,
+              ],
+            ];
+            await core.summary.addHeading('🧪 Test report → QuanLyCongViec', 3).addTable(rows).write();
             core.info(`Report sent to TanNhatCMS/QuanLyCongViec (PR #${process.env.PR_NUMBER}, ${process.env.CONCLUSION})`);
