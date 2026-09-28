@@ -1,0 +1,184 @@
+name: Test API (.NET)
+# run-name chứa dispatch_id để workflow phía main repo tìm đúng run vừa được kích hoạt
+run-name: "Test API · PR #${{ github.event.client_payload.pr_number || '-' }} · ${{ github.event.client_payload.dispatch_id }}"
+
+on:
+  repository_dispatch:
+    types: [trigger-test-api]
+
+concurrency:
+  group: test-dotnet-${{ github.event.client_payload.pr_number || github.event.client_payload.branch }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  MAIN_REPO: TanNhatCMS/QuanLyCongViec
+  STATUS_CONTEXT: .NET Test
+  DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+  DOTNET_NOLOGO: '1'
+  DOTNET_SKIP_FIRST_TIME_EXPERIENCE: '1'
+
+jobs:
+  test:
+    name: Build & Test
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      PR_NUMBER: ${{ github.event.client_payload.pr_number }}
+      HEAD_SHA: ${{ github.event.client_payload.sha }}
+      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+      HAS_GIST_TOKEN: ${{ secrets.GIST_TOKEN != '' }}
+
+    steps:
+      - name: Set pending status on main repo commit
+        if: env.HEAD_SHA != ''
+        env:
+          GH_TOKEN: ${{ secrets.MAIN_REPO_PR_TOKEN || secrets.MAIN_REPO_CHECKOUT_TOKEN }}
+        run: |
+          gh api "repos/$MAIN_REPO/statuses/$HEAD_SHA" \
+            -f state=pending -f target_url="$RUN_URL" \
+            -f description="Build & Test in progress..." -f context="$STATUS_CONTEXT" --silent \
+            || echo "::warning::Không thể set pending status trên $MAIN_REPO@$HEAD_SHA"
+
+      - name: Checkout Main Repository
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ env.MAIN_REPO }}
+          ref: ${{ github.event.client_payload.sha || github.event.client_payload.branch }}
+          fetch-depth: 1
+          token: ${{ secrets.MAIN_REPO_CHECKOUT_TOKEN }}
+          submodules: true
+
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Restore dependencies
+        id: restore
+        working-directory: server
+        run: dotnet restore
+
+      - name: Build
+        id: build
+        working-directory: server
+        run: dotnet build --no-restore --configuration Release
+
+      - name: Run tests
+        id: tests
+        working-directory: server
+        run: dotnet test --no-build --configuration Release --verbosity normal --logger "trx;LogFileName=test-results.trx" --collect:"XPlat Code Coverage" --results-directory ./coverage
+
+      - name: Merge coverage reports
+        id: merge
+        working-directory: server
+        run: |
+          dotnet tool install --global dotnet-reportgenerator-globaltool
+          reportgenerator -reports:"coverage/**/coverage.cobertura.xml" -targetdir:"coverage/merged" -reporttypes:"Cobertura"
+
+      - name: Code Coverage Summary
+        uses: irongut/CodeCoverageSummary@v1.3.0
+        with:
+          filename: server/coverage/merged/Cobertura.xml
+          badge: true
+          fail_below_min: false
+          format: markdown
+          hide_branch_rate: false
+          hide_complexity: true
+          indicators: true
+          output: both
+          thresholds: '50 75'
+
+      - name: Extract coverage percentage
+        id: coverage
+        working-directory: server
+        run: |
+          COVERAGE=$(grep -oP 'line-rate="\K[^"]+' coverage/merged/Cobertura.xml | head -1)
+          COVERAGE_PCT=$(echo "$COVERAGE * 100" | bc | xargs printf "%.1f")
+          echo "percentage=${COVERAGE_PCT}" >> $GITHUB_OUTPUT
+          echo "Dotnet Coverage: ${COVERAGE_PCT}%"
+
+      - name: Update coverage badge (Gist)
+        if: github.event.client_payload.branch == 'main' && github.event.client_payload.coverage_gist_id != '' && env.HAS_GIST_TOKEN == 'true'
+        uses: schneegans/dynamic-badges-action@v1.9.0
+        with:
+          auth: ${{ secrets.GIST_TOKEN }}
+          gistID: ${{ github.event.client_payload.coverage_gist_id }}
+          filename: dotnet-coverage.json
+          label: Dotnet coverage
+          message: '${{ steps.coverage.outputs.percentage }}%'
+          valColorRange: ${{ steps.coverage.outputs.percentage }}
+          minColorRange: 50
+          maxColorRange: 90
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-results
+          path: '**/*.trx'
+          retention-days: 7
+
+      - name: Upload coverage reports
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: coverage-reports
+          path: server/coverage/merged/Cobertura.xml
+          retention-days: 7
+          if-no-files-found: ignore
+
+      - name: Build PR report
+        if: always() && env.PR_NUMBER != ''
+        env:
+          JOB_STATUS: ${{ job.status }}
+          TRIGGER: ${{ github.event.client_payload.trigger || 'repository_dispatch' }}
+          CALLER_RUN_URL: ${{ github.event.client_payload.caller_run_url }}
+          RESTORE: ${{ steps.restore.outcome }}
+          BUILD: ${{ steps.build.outcome }}
+          TESTS: ${{ steps.tests.outcome }}
+        run: |
+          icon() { case "$1" in success) echo "✅ Passed";; failure) echo "❌ Failed";; cancelled) echo "🚫 Cancelled";; *) echo "⏭️ Skipped";; esac; }
+          [ "$JOB_STATUS" = "success" ] && RESULT="✅ Passed" || RESULT="❌ $JOB_STATUS"
+          {
+            echo "## 🧪 .NET Test — $RESULT"
+            echo
+            echo "| Step | Result |"
+            echo "|------|--------|"
+            echo "| Restore | $(icon "$RESTORE") |"
+            echo "| Build | $(icon "$BUILD") |"
+            echo "| Tests | $(icon "$TESTS") |"
+            echo
+            if [ -f code-coverage-results.md ]; then
+              sed 's/Code Coverage/Dotnet Coverage/g' code-coverage-results.md
+              echo
+            fi
+            CALLER=""
+            [ -n "$CALLER_RUN_URL" ] && CALLER=" · [caller run](${CALLER_RUN_URL})"
+            echo "<sub>🔗 [docker-tools run #${GITHUB_RUN_NUMBER}](${RUN_URL})${CALLER} · commit ${HEAD_SHA} · trigger: ${TRIGGER} · $(date -u '+%Y-%m-%d %H:%M UTC')</sub>"
+          } > pr-report.md
+
+      - name: Comment PR with results
+        if: always() && env.PR_NUMBER != ''
+        uses: marocchino/sticky-pull-request-comment@v3
+        with:
+          GITHUB_TOKEN: ${{ secrets.MAIN_REPO_PR_TOKEN || secrets.MAIN_REPO_CHECKOUT_TOKEN }}
+          owner: TanNhatCMS
+          repo: QuanLyCongViec
+          number: ${{ env.PR_NUMBER }}
+          header: dotnet-coverage
+          recreate: true
+          path: pr-report.md
+
+      - name: Set final status on main repo commit
+        if: always() && env.HEAD_SHA != ''
+        env:
+          GH_TOKEN: ${{ secrets.MAIN_REPO_PR_TOKEN || secrets.MAIN_REPO_CHECKOUT_TOKEN }}
+          STATE: ${{ job.status == 'success' && 'success' || 'failure' }}
+        run: |
+          gh api "repos/$MAIN_REPO/statuses/$HEAD_SHA" \
+            -f state="$STATE" -f target_url="$RUN_URL" \
+            -f description="$STATUS_CONTEXT $STATE" -f context="$STATUS_CONTEXT" --silent \
+            || echo "::warning::Không thể set final status trên $MAIN_REPO@$HEAD_SHA"

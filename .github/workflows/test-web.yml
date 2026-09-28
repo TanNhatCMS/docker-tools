@@ -1,0 +1,166 @@
+name: Test Web
+# run-name chứa dispatch_id để workflow phía main repo tìm đúng run vừa được kích hoạt
+run-name: "Test Web · PR #${{ github.event.client_payload.pr_number || '-' }} · ${{ github.event.client_payload.dispatch_id }}"
+
+on:
+  repository_dispatch:
+    types: [trigger-test-web]
+
+concurrency:
+  group: test-web-${{ github.event.client_payload.pr_number || github.event.client_payload.branch }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  MAIN_REPO: TanNhatCMS/QuanLyCongViec
+  STATUS_CONTEXT: Web Test
+
+jobs:
+  test:
+    name: Web Test
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      PR_NUMBER: ${{ github.event.client_payload.pr_number }}
+      HEAD_SHA: ${{ github.event.client_payload.sha }}
+      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+      HAS_GIST_TOKEN: ${{ secrets.GIST_TOKEN != '' }}
+
+    steps:
+      - name: Set pending status on main repo commit
+        if: env.HEAD_SHA != ''
+        env:
+          GH_TOKEN: ${{ secrets.MAIN_REPO_PR_TOKEN || secrets.MAIN_REPO_CHECKOUT_TOKEN }}
+        run: |
+          gh api "repos/$MAIN_REPO/statuses/$HEAD_SHA" \
+            -f state=pending -f target_url="$RUN_URL" \
+            -f description="Web Test in progress..." -f context="$STATUS_CONTEXT" --silent \
+            || echo "::warning::Không thể set pending status trên $MAIN_REPO@$HEAD_SHA"
+
+      - name: Checkout Main Repository
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ env.MAIN_REPO }}
+          ref: ${{ github.event.client_payload.sha || github.event.client_payload.branch }}
+          fetch-depth: 1
+          token: ${{ secrets.MAIN_REPO_CHECKOUT_TOKEN }}
+          submodules: true
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          cache: "pnpm"
+
+      - name: Install dependencies
+        id: install
+        run: pnpm install --frozen-lockfile
+
+      - name: Check inline styles
+        id: inline_styles
+        run: pnpm run lint:inline-styles
+
+      - name: Run tests with coverage
+        id: tests
+        run: pnpm --filter @qlcv/web run test --coverage
+
+      - name: Code Coverage Summary
+        uses: irongut/CodeCoverageSummary@v1.3.0
+        with:
+          filename: apps/web/coverage/cobertura-coverage.xml
+          badge: true
+          fail_below_min: false
+          format: markdown
+          hide_branch_rate: false
+          hide_complexity: true
+          indicators: true
+          output: both
+          thresholds: "50 75"
+
+      - name: Extract coverage percentage
+        id: coverage
+        run: |
+          COVERAGE=$(grep -oP 'line-rate="\K[^"]+' apps/web/coverage/cobertura-coverage.xml | head -1)
+          COVERAGE_PCT=$(echo "$COVERAGE * 100" | bc | xargs printf "%.1f")
+          echo "percentage=${COVERAGE_PCT}" >> $GITHUB_OUTPUT
+          echo "Web Coverage: ${COVERAGE_PCT}%"
+
+      - name: Update coverage badge (Gist)
+        if: github.event.client_payload.branch == 'main' && github.event.client_payload.coverage_gist_id != '' && env.HAS_GIST_TOKEN == 'true'
+        uses: schneegans/dynamic-badges-action@v1.9.0
+        with:
+          auth: ${{ secrets.GIST_TOKEN }}
+          gistID: ${{ github.event.client_payload.coverage_gist_id }}
+          filename: web-coverage.json
+          label: Web coverage
+          message: "${{ steps.coverage.outputs.percentage }}%"
+          valColorRange: ${{ steps.coverage.outputs.percentage }}
+          minColorRange: 50
+          maxColorRange: 90
+
+      - name: Upload coverage reports
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: web-coverage-reports
+          path: apps/web/coverage/cobertura-coverage.xml
+          retention-days: 7
+          if-no-files-found: ignore
+
+      - name: Build PR report
+        if: always() && env.PR_NUMBER != ''
+        env:
+          JOB_STATUS: ${{ job.status }}
+          TRIGGER: ${{ github.event.client_payload.trigger || 'repository_dispatch' }}
+          CALLER_RUN_URL: ${{ github.event.client_payload.caller_run_url }}
+          INSTALL: ${{ steps.install.outcome }}
+          INLINE_STYLES: ${{ steps.inline_styles.outcome }}
+          TESTS: ${{ steps.tests.outcome }}
+        run: |
+          icon() { case "$1" in success) echo "✅ Passed";; failure) echo "❌ Failed";; cancelled) echo "🚫 Cancelled";; *) echo "⏭️ Skipped";; esac; }
+          [ "$JOB_STATUS" = "success" ] && RESULT="✅ Passed" || RESULT="❌ $JOB_STATUS"
+          {
+            echo "## 🧪 Web Test — $RESULT"
+            echo
+            echo "| Step | Result |"
+            echo "|------|--------|"
+            echo "| Install dependencies | $(icon "$INSTALL") |"
+            echo "| Inline styles | $(icon "$INLINE_STYLES") |"
+            echo "| Vitest | $(icon "$TESTS") |"
+            echo
+            if [ -f code-coverage-results.md ]; then
+              sed 's/Code Coverage/Web Coverage/g' code-coverage-results.md
+              echo
+            fi
+            CALLER=""
+            [ -n "$CALLER_RUN_URL" ] && CALLER=" · [caller run](${CALLER_RUN_URL})"
+            echo "<sub>🔗 [docker-tools run #${GITHUB_RUN_NUMBER}](${RUN_URL})${CALLER} · commit ${HEAD_SHA} · trigger: ${TRIGGER} · $(date -u '+%Y-%m-%d %H:%M UTC')</sub>"
+          } > pr-report.md
+
+      - name: Comment PR with results
+        if: always() && env.PR_NUMBER != ''
+        uses: marocchino/sticky-pull-request-comment@v3
+        with:
+          GITHUB_TOKEN: ${{ secrets.MAIN_REPO_PR_TOKEN || secrets.MAIN_REPO_CHECKOUT_TOKEN }}
+          owner: TanNhatCMS
+          repo: QuanLyCongViec
+          number: ${{ env.PR_NUMBER }}
+          header: web-coverage
+          recreate: true
+          path: pr-report.md
+
+      - name: Set final status on main repo commit
+        if: always() && env.HEAD_SHA != ''
+        env:
+          GH_TOKEN: ${{ secrets.MAIN_REPO_PR_TOKEN || secrets.MAIN_REPO_CHECKOUT_TOKEN }}
+          STATE: ${{ job.status == 'success' && 'success' || 'failure' }}
+        run: |
+          gh api "repos/$MAIN_REPO/statuses/$HEAD_SHA" \
+            -f state="$STATE" -f target_url="$RUN_URL" \
+            -f description="$STATUS_CONTEXT $STATE" -f context="$STATUS_CONTEXT" --silent \
+            || echo "::warning::Không thể set final status trên $MAIN_REPO@$HEAD_SHA"
