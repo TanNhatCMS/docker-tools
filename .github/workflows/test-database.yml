@@ -1,0 +1,288 @@
+name: Test Database
+# run-name chứa dispatch_id để workflow phía main repo tìm đúng run vừa được kích hoạt
+run-name: "Test Database · PR #${{ github.event.client_payload.pr_number || '-' }} · ${{ github.event.client_payload.dispatch_id }}"
+
+on:
+  repository_dispatch:
+    types: [trigger-test-db]
+
+concurrency:
+  group: test-database-${{ github.event.client_payload.pr_number || github.event.client_payload.branch }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  MAIN_REPO: TanNhatCMS/QuanLyCongViec
+  STATUS_CONTEXT: Database Test
+
+jobs:
+  test:
+    name: Migration & Seed Test
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    services:
+      mariadb:
+        image: mariadb:12.3.2
+        env:
+          MARIADB_ROOT_PASSWORD: test
+          MARIADB_DATABASE: test_qlcv
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="healthcheck.sh --connect --innodb_initialized"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+
+    env:
+      PR_NUMBER: ${{ github.event.client_payload.pr_number }}
+      HEAD_SHA: ${{ github.event.client_payload.sha }}
+      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+      DATABASE_URL: "mysql://root:test@127.0.0.1:3306/test_qlcv"
+      LOCAL_DATABASE_URL: "mysql://root:test@127.0.0.1:3306/test_qlcv"
+      DATABASE_HOST: "127.0.0.1"
+      DATABASE_PORT: "3306"
+      DATABASE_USER: "root"
+      DATABASE_PASSWORD: "test"
+      DATABASE_NAME: "test_qlcv"
+
+    steps:
+      - name: Set pending status on main repo commit
+        if: env.HEAD_SHA != ''
+        env:
+          GH_TOKEN: ${{ secrets.MAIN_REPO_PR_TOKEN || secrets.MAIN_REPO_CHECKOUT_TOKEN }}
+        run: |
+          gh api "repos/$MAIN_REPO/statuses/$HEAD_SHA" \
+            -f state=pending -f target_url="$RUN_URL" \
+            -f description="Migration & Seed Test in progress..." -f context="$STATUS_CONTEXT" --silent \
+            || echo "::warning::Không thể set pending status trên $MAIN_REPO@$HEAD_SHA"
+
+      - name: Checkout Main Repository
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ env.MAIN_REPO }}
+          ref: ${{ github.event.client_payload.sha || github.event.client_payload.branch }}
+          fetch-depth: 1
+          token: ${{ secrets.MAIN_REPO_CHECKOUT_TOKEN }}
+          submodules: true
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          cache: "pnpm"
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Generate Prisma client
+        run: pnpm prisma generate
+
+      - name: Check for database backup
+        id: backup
+        run: |
+          BACKUP_FILE=$(find database/test/backup -name "*.sql" -type f 2>/dev/null | head -1)
+          if [ -n "$BACKUP_FILE" ]; then
+            echo "found=true" >> $GITHUB_OUTPUT
+            echo "file=$BACKUP_FILE" >> $GITHUB_OUTPUT
+            echo "📦 Found backup: $BACKUP_FILE"
+          else
+            echo "found=false" >> $GITHUB_OUTPUT
+            echo "➖ No backup found — will use fresh DB"
+          fi
+
+      - name: Import database backup
+        if: steps.backup.outputs.found == 'true'
+        env:
+          BACKUP_FILE: ${{ steps.backup.outputs.file }}
+        run: |
+          echo "📥 Importing backup: $BACKUP_FILE"
+          mysql -h 127.0.0.1 -u root -ptest test_qlcv < "$BACKUP_FILE"
+          echo "✅ Backup imported successfully"
+
+      - name: Run Prisma migrations
+        id: migrate
+        run: |
+          echo "🔄 Running prisma migrate deploy..."
+          # Lưu output ra file để bước báo cáo đọc lại (tránh nhúng thẳng vào expression)
+          if pnpm prisma migrate deploy > migrate-output.txt 2>&1; then
+            echo "status=passed" >> $GITHUB_OUTPUT
+            echo "✅ Migrations applied successfully"
+            cat migrate-output.txt
+          else
+            echo "status=failed" >> $GITHUB_OUTPUT
+            echo "❌ Migration failed!"
+            cat migrate-output.txt
+            exit 1
+          fi
+
+      - name: Run seed (only if no backup)
+        id: seed
+        if: steps.backup.outputs.found == 'false'
+        run: |
+          echo "🌱 Running database seed..."
+          bun database/seed.ts || {
+            echo "status=failed" >> $GITHUB_OUTPUT
+            echo "❌ Seed failed!"
+            exit 1
+          }
+          echo "status=passed" >> $GITHUB_OUTPUT
+          echo "✅ Seed completed successfully"
+
+      - name: Verify schema and data
+        id: verify
+        run: |
+          echo "🔍 Verifying database schema and data..."
+
+          TABLE_COUNT=$(mysql -h 127.0.0.1 -u root -ptest -N -e \
+            "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'test_qlcv' AND table_type = 'BASE TABLE';")
+          echo "table_count=$TABLE_COUNT" >> $GITHUB_OUTPUT
+          echo "📊 Tables: $TABLE_COUNT"
+
+          MISSING_TABLES=""
+          for TABLE in users companies company_task company_user roles permissions task_stages \
+                       task_monthly_records task_daily_records task_assignments notes notifications \
+                       notification_receivers audit_logs activity_logs refresh_tokens reminders \
+                       reminder_categories media system_info system_settings; do
+            EXISTS=$(mysql -h 127.0.0.1 -u root -ptest -N -e \
+              "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'test_qlcv' AND table_name = '$TABLE';")
+            if [ "$EXISTS" = "0" ]; then
+              MISSING_TABLES="$MISSING_TABLES $TABLE"
+            fi
+          done
+
+          if [ -n "$MISSING_TABLES" ]; then
+            echo "missing_tables=$MISSING_TABLES" >> $GITHUB_OUTPUT
+            echo "❌ Missing tables:$MISSING_TABLES"
+          else
+            echo "missing_tables=" >> $GITHUB_OUTPUT
+            echo "✅ All key tables exist"
+          fi
+
+          ROLES=$(mysql -h 127.0.0.1 -u root -ptest -N -e "SELECT COUNT(*) FROM test_qlcv.roles;" 2>/dev/null || echo "0")
+          PERMISSIONS=$(mysql -h 127.0.0.1 -u root -ptest -N -e "SELECT COUNT(*) FROM test_qlcv.permissions;" 2>/dev/null || echo "0")
+          TASK_STAGES=$(mysql -h 127.0.0.1 -u root -ptest -N -e "SELECT COUNT(*) FROM test_qlcv.task_stages;" 2>/dev/null || echo "0")
+          SYSTEM_INFO=$(mysql -h 127.0.0.1 -u root -ptest -N -e "SELECT COUNT(*) FROM test_qlcv.system_info;" 2>/dev/null || echo "0")
+          ADMIN_EXISTS=$(mysql -h 127.0.0.1 -u root -ptest -N -e "SELECT COUNT(*) FROM test_qlcv.users WHERE username='admin';" 2>/dev/null || echo "0")
+
+          echo "roles=$ROLES" >> $GITHUB_OUTPUT
+          echo "permissions=$PERMISSIONS" >> $GITHUB_OUTPUT
+          echo "task_stages=$TASK_STAGES" >> $GITHUB_OUTPUT
+          echo "system_info=$SYSTEM_INFO" >> $GITHUB_OUTPUT
+          echo "admin_exists=$ADMIN_EXISTS" >> $GITHUB_OUTPUT
+
+          echo "📊 Roles: $ROLES | Permissions: $PERMISSIONS | Task Stages: $TASK_STAGES"
+          echo "📊 System Info: $SYSTEM_INFO | Admin user: $ADMIN_EXISTS"
+
+          FK_COUNT=$(mysql -h 127.0.0.1 -u root -ptest -N -e \
+            "SELECT COUNT(*) FROM information_schema.table_constraints WHERE table_schema = 'test_qlcv' AND constraint_type = 'FOREIGN KEY';")
+          echo "fk_count=$FK_COUNT" >> $GITHUB_OUTPUT
+          echo "🔗 Foreign key constraints: $FK_COUNT"
+
+          VERIFY_STATUS="passed"
+          if [ -n "$MISSING_TABLES" ]; then
+            VERIFY_STATUS="failed"
+          fi
+          echo "status=$VERIFY_STATUS" >> $GITHUB_OUTPUT
+
+      - name: Build PR report
+        if: always() && env.PR_NUMBER != ''
+        env:
+          JOB_STATUS: ${{ job.status }}
+          TRIGGER: ${{ github.event.client_payload.trigger || 'repository_dispatch' }}
+          CALLER_RUN_URL: ${{ github.event.client_payload.caller_run_url }}
+          BACKUP_FOUND: ${{ steps.backup.outputs.found }}
+          MIGRATE: ${{ steps.migrate.outputs.status }}
+          SEED: ${{ steps.seed.outputs.status }}
+          VERIFY: ${{ steps.verify.outputs.status }}
+          TABLE_COUNT: ${{ steps.verify.outputs.table_count }}
+          MISSING_TABLES: ${{ steps.verify.outputs.missing_tables }}
+          ROLES: ${{ steps.verify.outputs.roles }}
+          PERMISSIONS: ${{ steps.verify.outputs.permissions }}
+          TASK_STAGES: ${{ steps.verify.outputs.task_stages }}
+          SYSTEM_INFO: ${{ steps.verify.outputs.system_info }}
+          ADMIN_EXISTS: ${{ steps.verify.outputs.admin_exists }}
+          FK_COUNT: ${{ steps.verify.outputs.fk_count }}
+        run: |
+          # Verify đánh dấu failed nhưng step vẫn exit 0 → bước "Fail if verification failed" chưa chạy
+          if [ "$JOB_STATUS" = "success" ] && [ "$VERIFY" != "failed" ]; then RESULT="✅ Passed"; else RESULT="❌ Failed"; fi
+          [ "$MIGRATE" = "passed" ] && MIGRATE_TXT="✅ Passed" || MIGRATE_TXT="❌ Failed"
+          if [ "$BACKUP_FOUND" = "true" ]; then
+            BACKUP_TXT="✅ Yes"; SEED_TXT="⏭️ Skipped (backup has data)"
+          else
+            BACKUP_TXT="➖ No (fresh DB)"
+            case "$SEED" in passed) SEED_TXT="✅ Passed";; failed) SEED_TXT="❌ Failed";; *) SEED_TXT="⏭️ Not run";; esac
+          fi
+          [ -z "$MISSING_TABLES" ] && MISSING_TXT="✅ None" || MISSING_TXT="$MISSING_TABLES"
+          [ "$ADMIN_EXISTS" = "1" ] && ADMIN_TXT="✅ exists" || ADMIN_TXT="❌ missing"
+          {
+            echo "## 🗄️ Database Migration Test Results — $RESULT"
+            echo
+            echo "| Item | Result |"
+            echo "|------|--------|"
+            echo "| **MariaDB** | \`12.3.2\` |"
+            echo "| **Backup imported** | $BACKUP_TXT |"
+            echo "| **Migration** | $MIGRATE_TXT |"
+            echo "| **Seed** | $SEED_TXT |"
+            echo "| **Tables** | $TABLE_COUNT |"
+            echo "| **Missing tables** | $MISSING_TXT |"
+            echo "| **Roles** | $ROLES |"
+            echo "| **Permissions** | $PERMISSIONS |"
+            echo "| **Task Stages** | $TASK_STAGES |"
+            echo "| **System Info** | $SYSTEM_INFO |"
+            echo "| **Admin user** | $ADMIN_TXT |"
+            echo "| **FK constraints** | $FK_COUNT |"
+            echo
+            echo "<details>"
+            echo "<summary>Migration output</summary>"
+            echo
+            echo '```'
+            [ -f migrate-output.txt ] && cat migrate-output.txt
+            echo '```'
+            echo "</details>"
+            echo
+            CALLER=""
+            [ -n "$CALLER_RUN_URL" ] && CALLER=" · [caller run](${CALLER_RUN_URL})"
+            echo "<sub>🔗 [docker-tools run #${GITHUB_RUN_NUMBER}](${RUN_URL})${CALLER} · commit ${HEAD_SHA} · trigger: ${TRIGGER} · $(date -u '+%Y-%m-%d %H:%M UTC')</sub>"
+          } > pr-report.md
+
+      - name: Comment PR with results
+        if: always() && env.PR_NUMBER != ''
+        uses: marocchino/sticky-pull-request-comment@v3
+        with:
+          GITHUB_TOKEN: ${{ secrets.MAIN_REPO_PR_TOKEN || secrets.MAIN_REPO_CHECKOUT_TOKEN }}
+          owner: TanNhatCMS
+          repo: QuanLyCongViec
+          number: ${{ env.PR_NUMBER }}
+          header: database-test
+          recreate: true
+          path: pr-report.md
+
+      - name: Fail if verification failed
+        if: steps.verify.outputs.status == 'failed'
+        env:
+          MISSING_TABLES: ${{ steps.verify.outputs.missing_tables }}
+        run: |
+          echo "❌ Database verification failed!"
+          echo "Missing tables: $MISSING_TABLES"
+          exit 1
+
+      - name: Set final status on main repo commit
+        if: always() && env.HEAD_SHA != ''
+        env:
+          GH_TOKEN: ${{ secrets.MAIN_REPO_PR_TOKEN || secrets.MAIN_REPO_CHECKOUT_TOKEN }}
+          STATE: ${{ job.status == 'success' && 'success' || 'failure' }}
+        run: |
+          gh api "repos/$MAIN_REPO/statuses/$HEAD_SHA" \
+            -f state="$STATE" -f target_url="$RUN_URL" \
+            -f description="$STATUS_CONTEXT $STATE" -f context="$STATUS_CONTEXT" --silent \
+            || echo "::warning::Không thể set final status trên $MAIN_REPO@$HEAD_SHA"
