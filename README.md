@@ -44,14 +44,20 @@ Main repo (`test-*.yml`) gửi `repository_dispatch` với payload:
 | `pr_number`        | PR để comment kết quả (rỗng → không comment)                             |
 | `dispatch_id`      | Đưa vào `run-name` để main repo tìm đúng run và chờ kết quả              |
 | `caller_run_url`   | Link run phía main repo, hiện ở cuối comment                             |
-| `comment_id`       | Comment lệnh `$test-*` (qua ci-dispatcher) → thả 👍/👎 khi test kết thúc |
+| `comment_id`       | Comment lệnh `$test-*` (qua ci-dispatcher) → quote-reply kết quả + 👍/👎 |
 | `coverage_gist_id` | Chỉ gửi khi chạy trên `main` → cập nhật badge coverage (cần `GIST_TOKEN`) |
 
-Sau khi test xong (kể cả khi fail), workflow comment sticky vào PR của `TanNhatCMS/QuanLyCongViec`
-(bảng kết quả từng bước + coverage nếu có) và set commit status tương ứng.
-Nếu lệnh đến từ comment `$test-*`, workflow thả 👍 (pass) / 👎 (fail) vào chính comment đó
-(main repo chỉ thả 👀 khi nhận lệnh và 🚀 khi đã gửi dispatch, không đứng chờ kết quả).
+Sau khi test xong (kể cả khi fail), workflow set commit status trên main repo rồi **gửi báo cáo ngược về**
+`TanNhatCMS/QuanLyCongViec` bằng `repository_dispatch` (`test-report`: `pr_number`, `comment_id`, `header`,
+`conclusion`, `body`). Workflow `test-report.yml` ở main repo đăng comment bằng `GITHUB_TOKEN`
+(`github-actions[bot]`), nên `ci-dispatcher` luôn bỏ qua các comment này:
 
-Secrets dùng: `MAIN_REPO_CHECKOUT_TOKEN` (checkout + mặc định dùng để comment/status),
-`MAIN_REPO_PR_TOKEN` (tùy chọn — token riêng có quyền `pull-requests`/`statuses: write` trên main repo),
+- Lệnh từ comment `$test-*` → quote-reply comment lệnh kèm kết quả + thả 👍 (pass) / 👎 (fail)
+  (main repo đã thả 👀 khi nhận lệnh và 🚀 + reply "đang chạy" khi gửi dispatch).
+- Chạy tự động (PR `ready_for_review`) → sticky comment như trước.
+
+docker-tools **không** comment trực tiếp: comment tạo bằng PAT mang tên user, `ci-dispatcher` sẽ coi là người.
+
+Secrets dùng: `MAIN_REPO_CHECKOUT_TOKEN` (checkout + mặc định dùng để set status / gửi `test-report`),
+`MAIN_REPO_PR_TOKEN` (tùy chọn — token riêng có quyền `statuses` + `contents: write` (dispatch) trên main repo),
 `GIST_TOKEN` (tùy chọn — badge coverage).
