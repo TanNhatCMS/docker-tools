@@ -122,9 +122,13 @@ jobs:
           INLINE_STYLES: ${{ steps.inline_styles.outcome }}
           TESTS: ${{ steps.tests.outcome }}
         run: |
+          # Nhánh cũ gửi trigger dạng `$test-*` — bỏ `$` để comment này không kích hoạt lại ci-dispatcher
+          TRIGGER="${TRIGGER//\$/}"
           icon() { case "$1" in success) echo "✅ Passed";; failure) echo "❌ Failed";; cancelled) echo "🚫 Cancelled";; *) echo "⏭️ Skipped";; esac; }
           [ "$JOB_STATUS" = "success" ] && RESULT="✅ Passed" || RESULT="❌ $JOB_STATUS"
           {
+            # ci-dispatcher bỏ qua comment có marker này (comment đăng bằng PAT user, không phải Bot)
+            echo '<!-- ci-dispatcher:ignore -->'
             echo "## 🧪 Web Test — $RESULT"
             echo
             echo "| Step | Result |"
@@ -142,8 +146,9 @@ jobs:
             echo "<sub>🔗 [docker-tools run #${GITHUB_RUN_NUMBER}](${RUN_URL})${CALLER} · commit ${HEAD_SHA} · trigger: ${TRIGGER} · $(date -u '+%Y-%m-%d %H:%M UTC')</sub>"
           } > pr-report.md
 
+      # Lệnh từ comment `$test-*`: trả lời bằng quote-reply comment lệnh (bên dưới) thay cho sticky comment
       - name: Comment PR with results
-        if: always() && env.PR_NUMBER != ''
+        if: always() && env.PR_NUMBER != '' && github.event.client_payload.comment_id == ''
         uses: marocchino/sticky-pull-request-comment@v3
         with:
           GITHUB_TOKEN: ${{ secrets.MAIN_REPO_PR_TOKEN || secrets.MAIN_REPO_CHECKOUT_TOKEN }}
@@ -164,3 +169,29 @@ jobs:
             -f state="$STATE" -f target_url="$RUN_URL" \
             -f description="$STATUS_CONTEXT $STATE" -f context="$STATUS_CONTEXT" --silent \
             || echo "::warning::Không thể set final status trên $MAIN_REPO@$HEAD_SHA"
+
+      - name: Reply to command comment with results
+        if: always() && env.PR_NUMBER != '' && github.event.client_payload.comment_id != ''
+        env:
+          GH_TOKEN: ${{ secrets.MAIN_REPO_PR_TOKEN || secrets.MAIN_REPO_CHECKOUT_TOKEN }}
+          COMMENT_ID: ${{ github.event.client_payload.comment_id }}
+        run: |
+          QUOTE=$(gh api "repos/$MAIN_REPO/issues/comments/$COMMENT_ID" --jq .body | tr -d '\r' | sed 's/^/> /') || QUOTE=""
+          {
+            [ -n "$QUOTE" ] && printf '%s\n\n' "$QUOTE"
+            cat pr-report.md
+          } > reply.md
+          gh api "repos/$MAIN_REPO/issues/$PR_NUMBER/comments" -F body=@reply.md --silent \
+            || echo "::warning::Không thể trả lời comment $COMMENT_ID trên PR #$PR_NUMBER"
+
+      # Lệnh đến từ comment trên PR (ci-dispatcher): thả 👍/👎 vào chính comment đó khi test kết thúc
+      - name: React to command comment
+        if: always() && github.event.client_payload.comment_id != ''
+        env:
+          GH_TOKEN: ${{ secrets.MAIN_REPO_PR_TOKEN || secrets.MAIN_REPO_CHECKOUT_TOKEN }}
+          COMMENT_ID: ${{ github.event.client_payload.comment_id }}
+          REACTION: ${{ job.status == 'success' && '+1' || '-1' }}
+        run: |
+          gh api "repos/$MAIN_REPO/issues/comments/$COMMENT_ID/reactions" \
+            -f content="$REACTION" --silent \
+            || echo "::warning::Không thể thả reaction $REACTION vào comment $COMMENT_ID trên $MAIN_REPO"
