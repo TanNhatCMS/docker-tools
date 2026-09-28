@@ -47,13 +47,17 @@ Main repo (`test-*.yml`) gửi `repository_dispatch` với payload:
 | `comment_id`       | Comment lệnh `$test-*` (qua ci-dispatcher) → quote-reply kết quả + 👍/👎 |
 | `coverage_gist_id` | Chỉ gửi khi chạy trên `main` → cập nhật badge coverage (cần `GIST_TOKEN`) |
 
-Sau khi test xong (kể cả khi fail), workflow set commit status trên main repo rồi **gửi báo cáo ngược về**
-`TanNhatCMS/QuanLyCongViec` bằng `repository_dispatch` (`test-report`: `pr_number`, `comment_id`, `header`,
-`conclusion`, `body`). Workflow `test-report.yml` ở main repo đăng comment bằng `GITHUB_TOKEN`
+Workflow gửi báo cáo ngược về `TanNhatCMS/QuanLyCongViec` bằng `repository_dispatch` (`test-report`):
+
+- `stage: started` — ngay khi job bắt đầu (chỉ với lệnh từ comment) → main repo thả 🚀 vào comment lệnh.
+- `stage: completed` — sau khi test xong (kể cả khi fail) và đã set commit status: `pr_number`, `comment_id`,
+  `header`, `conclusion`, `run_url`, `body`.
+
+Job summary có link tới PR và thẳng tới comment lệnh (`#issuecomment-<id>`). Workflow `test-report.yml` ở main repo đăng comment bằng `GITHUB_TOKEN`
 (`github-actions[bot]`), nên `ci-dispatcher` luôn bỏ qua các comment này:
 
 - Lệnh từ comment `$test-*` → quote-reply comment lệnh kèm kết quả + thả 👍 (pass) / 👎 (fail)
-  (main repo đã thả 👀 khi nhận lệnh và 🚀 + reply "đang chạy" khi gửi dispatch).
+  (main repo đã thả 👀 khi nhận lệnh và reply bảng link run khi gửi dispatch; 🚀 khi docker-tools bắt đầu chạy).
 - Chạy tự động (PR `ready_for_review`) → sticky comment như trước.
 
 docker-tools **không** comment trực tiếp: comment tạo bằng PAT mang tên user, `ci-dispatcher` sẽ coi là người.
