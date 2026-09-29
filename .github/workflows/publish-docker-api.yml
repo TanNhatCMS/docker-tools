@@ -1,16 +1,62 @@
 name: Docker Publish API Build
+# Reusable workflow — được caller (phu-nam-hai-jsco/task-manager) gọi qua `uses:`.
+# Build image API (.NET) từ `docker/dotnet/Dockerfile` (COPY `server/**`) của caller repo.
 
 on:
-  repository_dispatch:
-    types: [trigger-publish-api]
+  workflow_call:
+    inputs:
+      ref:
+        description: 'Git ref of the caller repo to checkout/test/build'
+        type: string
+        required: false
+        default: ''
+      pr_number:
+        description: 'PR number for report/comment flows'
+        type: string
+        required: false
+        default: ''
+      comment_id:
+        description: 'Command comment id for $test-* flows'
+        type: string
+        required: false
+        default: ''
+      trigger:
+        description: 'Human-readable trigger label'
+        type: string
+        required: false
+        default: 'workflow_call'
+      version:
+        description: 'Version to tag the image with (fallback: server/version.build.yml → server/build/api.build.yml → 1.0.0-dev)'
+        type: string
+        required: false
+        default: ''
+      branch:
+        description: 'Branch name for image lane tagging (default: main lane, no prefix)'
+        type: string
+        required: false
+        default: 'main'
+    secrets:
+      SUBMODULE_TOKEN:
+        description: 'PAT with repo scope to checkout private submodules + main repo'
+        required: false
+      GHCR_TOKEN:
+        description: 'Optional PAT with write:packages to push to GHCR (fallback: MAIN_REPO_CHECKOUT_TOKEN, then GITHUB_TOKEN)'
+        required: false
+      MAIN_REPO_CHECKOUT_TOKEN:
+        description: 'Optional PAT fallback for checkout + GHCR login'
+        required: false
+      MEDIATR_LICENSE_KEY:
+        description: 'Optional MediatR license key baked into the API image (MEDIATR__LICENSEKEY build arg)'
+        required: false
 
 concurrency:
-  group: publish-docker-api-${{ github.event.client_payload.branch }}
+  group: publish-docker-api-${{ inputs.branch || inputs.ref || github.sha }}
   cancel-in-progress: true
 
 env:
   REGISTRY: ghcr.io
-  OWNER: tannhatcms
+  # Ảnh publish về namespace của caller repo (GITHUB_TOKEN + packages:write đủ quyền push)
+  OWNER: ${{ github.repository_owner }}
 
 permissions:
   contents: read
@@ -23,39 +69,27 @@ jobs:
     timeout-minutes: 30
 
     steps:
-      - name: Checkout Server Repository
+      - name: Checkout repository
         uses: actions/checkout@v7
         with:
-          repository: phu-nam-hai-jsco/quan-ly-cong-viec-server
-          ref: 'main' #ref: ${{ github.event.client_payload.branch || 'main' }}
-          fetch-depth: 0
-          token: ${{ secrets.MAIN_REPO_CHECKOUT_TOKEN }}
-
-      - name: Try checkout specific SHA if exists
-        run: |
-          TARGET_SHA="${{ github.event.client_payload.sha }}"
-          if [ -n "$TARGET_SHA" ]; then
-            if git cat-file -e "$TARGET_SHA^{commit}" 2>/dev/null; then
-              echo "Checking out $TARGET_SHA..."
-              git checkout "$TARGET_SHA"
-            else
-              echo "SHA $TARGET_SHA not found in server repo (likely from super repo). Staying on branch ${{ github.event.client_payload.branch }}."
-            fi
-          fi
+          ref: ${{ inputs.ref || github.sha }}
+          fetch-depth: 1
+          token: ${{ secrets.SUBMODULE_TOKEN || secrets.MAIN_REPO_CHECKOUT_TOKEN || github.token }}
+          submodules: recursive
 
       - name: Resolve version
         id: version
         run: |
           RAW_VERSION=""
-          if [ -n "${{ github.event.client_payload.version }}" ]; then
-            RAW_VERSION="${{ github.event.client_payload.version }}"
-            echo "Source: client_payload"
-          elif [ -f "version.build.yml" ]; then
-            RAW_VERSION=$(grep -E '^[[:space:]]*version:' version.build.yml | head -n1 | sed -E 's/^[[:space:]]*version:[[:space:]]*["'\'']?([^"'\'']+)["'\'']?/\1/' | tr -d '[:space:]')
-            echo "Source: version.build.yml"
-          elif [ -f "build/api.build.yml" ]; then
-            RAW_VERSION=$(grep -E '^[[:space:]]*version:' build/api.build.yml | head -n1 | sed -E 's/^[[:space:]]*version:[[:space:]]*["'\'']?([^"'\'']+)["'\'']?/\1/' | tr -d '[:space:]')
-            echo "Source: build/api.build.yml"
+          if [ -n "${{ inputs.version }}" ]; then
+            RAW_VERSION="${{ inputs.version }}"
+            echo "Source: workflow input"
+          elif [ -f "server/version.build.yml" ]; then
+            RAW_VERSION=$(grep -E '^[[:space:]]*version:' server/version.build.yml | head -n1 | sed -E 's/^[[:space:]]*version:[[:space:]]*["'\'']?([^"'\'']+)["'\'']?/\1/' | tr -d '[:space:]')
+            echo "Source: server/version.build.yml"
+          elif [ -f "server/build/api.build.yml" ]; then
+            RAW_VERSION=$(grep -E '^[[:space:]]*version:' server/build/api.build.yml | head -n1 | sed -E 's/^[[:space:]]*version:[[:space:]]*["'\'']?([^"'\'']+)["'\'']?/\1/' | tr -d '[:space:]')
+            echo "Source: server/build/api.build.yml"
           fi
 
           # Chuẩn hóa version: bỏ 'v' ở đầu nếu có (vd: v2.9.6 -> 2.9.6)
@@ -74,7 +108,7 @@ jobs:
       - name: Resolve lane prefix
         id: lane
         run: |
-          BRANCH="${{ github.event.client_payload.branch }}"
+          BRANCH="${{ inputs.branch }}"
           if [ "$BRANCH" = "main" ]; then
             echo "prefix=" >> $GITHUB_OUTPUT
             echo "suffix=" >> $GITHUB_OUTPUT
@@ -82,8 +116,6 @@ jobs:
             echo "prefix=${BRANCH}-" >> $GITHUB_OUTPUT
             echo "suffix=-${BRANCH}" >> $GITHUB_OUTPUT
           fi
-          echo "base_image=${{ env.REGISTRY }}/${{ env.OWNER }}/qlcv-api-base:latest" >> $GITHUB_OUTPUT
-          echo "runtime_base_image=${{ env.REGISTRY }}/${{ env.OWNER }}/qlcv-api-runtime-base:latest" >> $GITHUB_OUTPUT
           echo "Branch: $BRANCH"
 
       - name: Set up Docker Buildx
@@ -93,43 +125,8 @@ jobs:
         uses: docker/login-action@v4
         with:
           registry: ${{ env.REGISTRY }}
-          username: ${{ env.OWNER }}
-          password: ${{ secrets.MAIN_REPO_CHECKOUT_TOKEN }}
-
-      - name: Pull base images for caching
-        run: |
-          docker pull ${{ steps.lane.outputs.base_image }} || true
-          docker pull ${{ steps.lane.outputs.runtime_base_image }} || true
-
-      - name: Extract Base Image Digest
-        id: base_digest
-        run: |
-          RAW_DIGEST=$(docker image inspect ${{ steps.lane.outputs.base_image }} 2>/dev/null | jq -r '.[0].RepoDigests[0] // .[0].Id' 2>/dev/null || echo "")
-          DIGEST=${RAW_DIGEST#*sha256:}
-          DIGEST=${DIGEST:0:7}
-          if [ -z "$DIGEST" ] || [ "$DIGEST" = "null" ]; then DIGEST="unknown"; fi
-          echo "Base Digest: $DIGEST"
-          echo "short=${DIGEST}" >> $GITHUB_OUTPUT
-
-          RAW_RT=$(docker image inspect ${{ steps.lane.outputs.runtime_base_image }} 2>/dev/null | jq -r '.[0].RepoDigests[0] // .[0].Id' 2>/dev/null || echo "")
-          RT_DIGEST=${RAW_RT#*sha256:}
-          RT_DIGEST=${RT_DIGEST:0:7}
-          if [ -z "$RT_DIGEST" ] || [ "$RT_DIGEST" = "null" ]; then RT_DIGEST="unknown"; fi
-          echo "Runtime Digest: $RT_DIGEST"
-          echo "rt_short=${RT_DIGEST}" >> $GITHUB_OUTPUT
-      - name: Decrypt Secrets
-        id: decrypt
-        env:
-          ENCRYPTED_PAYLOAD: ${{ github.event.client_payload.encrypted_payload }}
-          PAYLOAD_ENCRYPTION_KEY: ${{ secrets.PAYLOAD_ENCRYPTION_KEY }}
-        run: |
-          if [ -n "$ENCRYPTED_PAYLOAD" ]; then
-            echo "$ENCRYPTED_PAYLOAD" | base64 -d | openssl enc -d -aes-256-cbc -salt -pbkdf2 -pass pass:$PAYLOAD_ENCRYPTION_KEY -out decrypted.json
-            
-            MEDIATR=$(jq -r '.mediatr_licensekey // empty' decrypted.json)
-            [ -n "$MEDIATR" ] && echo "::add-mask::$MEDIATR"
-            echo "mediatr_licensekey=$MEDIATR" >> $GITHUB_OUTPUT
-          fi
+          username: ${{ github.actor }}
+          password: ${{ secrets.GHCR_TOKEN || secrets.MAIN_REPO_CHECKOUT_TOKEN || github.token }}
 
       - name: Docker metadata
         id: meta
@@ -141,7 +138,6 @@ jobs:
           tags: |
             type=raw,value=latest${{ steps.lane.outputs.suffix }}
             type=raw,value=${{ steps.version.outputs.version }}${{ steps.lane.outputs.suffix }}
-            type=raw,value=${{ steps.version.outputs.version }}${{ steps.lane.outputs.suffix }}-base-${{ steps.base_digest.outputs.short }}-rt-${{ steps.base_digest.outputs.rt_short }}
             type=sha,prefix=${{ steps.lane.outputs.prefix }}sha-,format=short
 
       - name: Build and push API image
@@ -149,7 +145,7 @@ jobs:
         uses: docker/build-push-action@v7
         with:
           context: .
-          file: docker/Dockerfile
+          file: docker/dotnet/Dockerfile
           platforms: linux/amd64
           push: true
           tags: ${{ steps.meta.outputs.tags }}
@@ -162,10 +158,8 @@ jobs:
           sbom: false
           build-args: |
             APP_VERSION=${{ steps.version.outputs.version }}
-            BASE_IMAGE=${{ steps.lane.outputs.base_image }}
-            RUNTIME_BASE_IMAGE=${{ steps.lane.outputs.runtime_base_image }}
-            GIT_COMMIT_HASH=${{ github.event.client_payload.sha }}
-            MEDIATR__LICENSEKEY=${{ steps.decrypt.outputs.mediatr_licensekey }}
+            GIT_COMMIT_HASH=${{ inputs.ref || github.sha }}
+            MEDIATR__LICENSEKEY=${{ secrets.MEDIATR_LICENSE_KEY }}
 
       - name: Summary
         run: |
@@ -173,9 +167,7 @@ jobs:
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "**Image:** \`${{ env.REGISTRY }}/${{ env.OWNER }}/qlcv-api\`" >> "$GITHUB_STEP_SUMMARY"
           echo "**Version:** \`${{ steps.version.outputs.version }}\`" >> "$GITHUB_STEP_SUMMARY"
-          echo "**Branch:** \`${{ github.event.client_payload.branch }}\`" >> "$GITHUB_STEP_SUMMARY"
-          echo "**Base Digest:** \`${{ steps.base_digest.outputs.short }}\`" >> "$GITHUB_STEP_SUMMARY"
-          echo "**Runtime Digest:** \`${{ steps.base_digest.outputs.rt_short }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "**Branch:** \`${{ inputs.branch }}\`" >> "$GITHUB_STEP_SUMMARY"
           echo "**Digest:** \`${{ steps.build.outputs.digest }}\`" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "### Tags" >> "$GITHUB_STEP_SUMMARY"

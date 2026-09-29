@@ -1,20 +1,65 @@
 name: Test Desktop (Rust)
-# run-name chứa dispatch_id để workflow phía main repo tìm đúng run vừa được kích hoạt
-run-name: "Test Desktop · PR #${{ github.event.client_payload.pr_number || '-' }} · ${{ github.event.client_payload.dispatch_id }}"
+# Reusable workflow — được caller (phu-nam-hai-jsco/task-manager) gọi qua `uses:`.
+# run-name chứa ref để phân biệt các lần chạy.
+run-name: "${{ github.workflow }} · ${{ inputs.ref || github.sha }}"
 
 on:
-  repository_dispatch:
-    types: [trigger-test-app]
+  workflow_call:
+    inputs:
+      ref:
+        description: 'Git ref of the caller repo to checkout/test/build'
+        type: string
+        required: false
+        default: ''
+      pr_number:
+        description: 'PR number for report/comment flows'
+        type: string
+        required: false
+        default: ''
+      comment_id:
+        description: 'Command comment id for $test-* flows'
+        type: string
+        required: false
+        default: ''
+      trigger:
+        description: 'Human-readable trigger label'
+        type: string
+        required: false
+        default: 'workflow_call'
+      caller_run_url:
+        description: 'Caller workflow run URL (shown in the report footer)'
+        type: string
+        required: false
+        default: ''
+      coverage_gist_id:
+        description: 'Gist id để cập nhật badge coverage (chỉ chạy trên main)'
+        type: string
+        required: false
+        default: ''
+    secrets:
+      SUBMODULE_TOKEN:
+        description: 'PAT with repo scope to checkout private submodules + main repo'
+        required: false
+      MAIN_REPO_PR_TOKEN:
+        description: 'Optional PAT (contents:write + statuses:write trên caller repo) để set commit status / gửi báo cáo test-report'
+        required: false
+      MAIN_REPO_CHECKOUT_TOKEN:
+        description: 'Optional PAT fallback cho checkout'
+        required: false
+      GIST_TOKEN:
+        description: 'Optional PAT để cập nhật badge coverage (gist)'
+        required: false
 
 concurrency:
-  group: test-desktop-${{ github.event.client_payload.pr_number || github.event.client_payload.branch }}
+  group: test-desktop-${{ inputs.pr_number || inputs.ref || github.sha }}
   cancel-in-progress: true
 
 permissions:
   contents: read
 
 env:
-  MAIN_REPO: TanNhatCMS/QuanLyCongViec
+  # Caller repo context (reusable workflow chạy với context của caller)
+  MAIN_REPO: ${{ github.repository }}
   STATUS_CONTEXT: Desktop Test
   CARGO_TERM_COLOR: always
   CARGO_INCREMENTAL: '0'
@@ -26,15 +71,15 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     env:
-      PR_NUMBER: ${{ github.event.client_payload.pr_number }}
-      HEAD_SHA: ${{ github.event.client_payload.sha }}
+      PR_NUMBER: ${{ inputs.pr_number }}
+      HEAD_SHA: ${{ inputs.ref }}
       RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
       HAS_GIST_TOKEN: ${{ secrets.GIST_TOKEN != '' }}
       # Coverage chỉ cần khi có PR để comment, hoặc khi chạy trên main để cập nhật badge
-      WITH_COVERAGE: ${{ github.event.client_payload.pr_number != '' || github.event.client_payload.branch == 'main' }}
+      WITH_COVERAGE: ${{ inputs.pr_number != '' || inputs.ref == 'main' }}
 
     steps:
-      - name: Set pending status on main repo commit
+      - name: Set pending status on caller repo commit
         if: env.HEAD_SHA != ''
         env:
           GH_TOKEN: ${{ secrets.MAIN_REPO_PR_TOKEN || secrets.MAIN_REPO_CHECKOUT_TOKEN }}
@@ -44,19 +89,19 @@ jobs:
             -f description="Run Tests in progress..." -f context="$STATUS_CONTEXT" --silent \
             || echo "::warning::Không thể set pending status trên $MAIN_REPO@$HEAD_SHA"
 
-      # Lệnh từ comment `$test-*`: báo main repo docker-tools đã bắt đầu chạy → test-report.yml thả 🚀
+      # Lệnh từ comment `$test-*`: báo caller repo đã bắt đầu chạy → test-report.yml thả 🚀
       - name: Notify started
-        if: env.PR_NUMBER != '' && github.event.client_payload.comment_id != ''
+        if: env.PR_NUMBER != '' && inputs.comment_id != ''
         continue-on-error: true
         uses: actions/github-script@v9
         env:
-          COMMENT_ID: ${{ github.event.client_payload.comment_id }}
+          COMMENT_ID: ${{ inputs.comment_id }}
         with:
           github-token: ${{ secrets.MAIN_REPO_PR_TOKEN || secrets.MAIN_REPO_CHECKOUT_TOKEN }}
           script: |
             await github.rest.repos.createDispatchEvent({
-              owner: 'TanNhatCMS',
-              repo: 'QuanLyCongViec',
+              owner: context.repo.owner,
+              repo: context.repo.repo,
               event_type: 'test-report',
               client_payload: {
                 stage: 'started',
@@ -67,14 +112,13 @@ jobs:
               },
             });
 
-      - name: Checkout Main Repository
+      - name: Checkout repository
         uses: actions/checkout@v7
         with:
-          repository: ${{ env.MAIN_REPO }}
-          ref: ${{ github.event.client_payload.sha || github.event.client_payload.branch }}
+          ref: ${{ inputs.ref || github.sha }}
           fetch-depth: 1
-          token: ${{ secrets.MAIN_REPO_CHECKOUT_TOKEN }}
-          submodules: true
+          token: ${{ secrets.SUBMODULE_TOKEN || secrets.MAIN_REPO_CHECKOUT_TOKEN || github.token }}
+          submodules: recursive
 
       - name: Install system dependencies (Linux / Tauri)
         run: |
@@ -126,7 +170,7 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             artifacts/target
-          key: ${{ runner.os }}-cargo-test-${{ hashFiles('apps/desktop/Cargo.lock') }}
+          key: ${{ runner.os }}-cargo-test-${{ hashFiles('desktop/Cargo.lock') }}
           restore-keys: |
             ${{ runner.os }}-cargo-test-
 
@@ -135,7 +179,7 @@ jobs:
         if: env.WITH_COVERAGE != 'true'
         env:
           RUSTFLAGS: ''
-        run: cargo test --manifest-path apps/desktop/Cargo.toml --all-features
+        run: cargo test --manifest-path desktop/Cargo.toml --all-features
 
       - name: Run tests with coverage
         id: tests_cov
@@ -144,7 +188,7 @@ jobs:
           RUSTFLAGS: ''
         run: |
           mkdir -p coverage
-          cargo llvm-cov --manifest-path apps/desktop/Cargo.toml --all-features --cobertura --output-path coverage/desktop-coverage.xml
+          cargo llvm-cov --manifest-path desktop/Cargo.toml --all-features --cobertura --output-path coverage/desktop-coverage.xml
 
       - name: Code Coverage Summary
         if: env.WITH_COVERAGE == 'true'
@@ -170,11 +214,11 @@ jobs:
           echo "Desktop Coverage: ${COVERAGE_PCT}%"
 
       - name: Update coverage badge (Gist)
-        if: github.event.client_payload.branch == 'main' && github.event.client_payload.coverage_gist_id != '' && env.HAS_GIST_TOKEN == 'true'
+        if: inputs.ref == 'main' && inputs.coverage_gist_id != '' && env.HAS_GIST_TOKEN == 'true'
         uses: schneegans/dynamic-badges-action@v1.9.0
         with:
           auth: ${{ secrets.GIST_TOKEN }}
-          gistID: ${{ github.event.client_payload.coverage_gist_id }}
+          gistID: ${{ inputs.coverage_gist_id }}
           filename: desktop-coverage.json
           label: Desktop coverage
           message: '${{ steps.coverage.outputs.percentage }}%'
@@ -195,8 +239,8 @@ jobs:
         if: always() && env.PR_NUMBER != ''
         env:
           JOB_STATUS: ${{ job.status }}
-          TRIGGER: ${{ github.event.client_payload.trigger || 'repository_dispatch' }}
-          CALLER_RUN_URL: ${{ github.event.client_payload.caller_run_url }}
+          TRIGGER: ${{ inputs.trigger }}
+          CALLER_RUN_URL: ${{ inputs.caller_run_url }}
           INSTALL: ${{ steps.install.outcome }}
           BUILD_UI: ${{ steps.build_ui.outcome }}
           TESTS: ${{ steps.tests_cov.outcome }}
@@ -218,10 +262,10 @@ jobs:
             fi
             CALLER=""
             [ -n "$CALLER_RUN_URL" ] && CALLER=" · [caller run](${CALLER_RUN_URL})"
-            echo "<sub>🔗 [docker-tools run #${GITHUB_RUN_NUMBER}](${RUN_URL})${CALLER} · commit ${HEAD_SHA} · trigger: ${TRIGGER} · $(date -u '+%Y-%m-%d %H:%M UTC')</sub>"
+            echo "<sub>🔗 [workflow run #${GITHUB_RUN_NUMBER}](${RUN_URL})${CALLER} · commit ${HEAD_SHA} · trigger: ${TRIGGER} · $(date -u '+%Y-%m-%d %H:%M UTC')</sub>"
           } > pr-report.md
 
-      - name: Set final status on main repo commit
+      - name: Set final status on caller repo commit
         if: always() && env.HEAD_SHA != ''
         env:
           GH_TOKEN: ${{ secrets.MAIN_REPO_PR_TOKEN || secrets.MAIN_REPO_CHECKOUT_TOKEN }}
@@ -233,13 +277,14 @@ jobs:
             || echo "::warning::Không thể set final status trên $MAIN_REPO@$HEAD_SHA"
 
       # Không comment trực tiếp bằng PAT (comment sẽ mang tên user → ci-dispatcher coi là người).
-      # Gửi báo cáo về main repo (repository_dispatch 'test-report'); workflow test-report.yml ở đó
-      # đăng comment (sticky, hoặc quote-reply comment lệnh) + thả 👍/👎 bằng GITHUB_TOKEN (github-actions[bot]).
-      - name: Send report to main repo
+      # Gửi báo cáo về caller repo qua createDispatchEvent 'test-report'; workflow test-report.yml
+      # ở caller repo đăng comment (sticky, hoặc quote-reply comment lệnh) + thả 👍/👎 bằng GITHUB_TOKEN
+      # (github-actions[bot]).
+      - name: Send report to caller repo
         if: always() && env.PR_NUMBER != ''
         uses: actions/github-script@v9
         env:
-          COMMENT_ID: ${{ github.event.client_payload.comment_id }}
+          COMMENT_ID: ${{ inputs.comment_id }}
           CONCLUSION: ${{ job.status }}
         with:
           github-token: ${{ secrets.MAIN_REPO_PR_TOKEN || secrets.MAIN_REPO_CHECKOUT_TOKEN }}
@@ -247,11 +292,11 @@ jobs:
             const fs = require('fs');
             let body = fs.existsSync('pr-report.md') ? fs.readFileSync('pr-report.md', 'utf8') : '';
             if (!body) body = `## 🧪 desktop-coverage — ❌ ${process.env.CONCLUSION}\n\nKhông tạo được báo cáo: ${process.env.RUN_URL}`;
-            // repository_dispatch giới hạn kích thước payload → cắt bớt báo cáo quá dài
+            // Dispatch event giới hạn kích thước payload → cắt bớt báo cáo quá dài
             if (body.length > 60000) body = body.slice(0, 60000) + '\n\n…(báo cáo bị cắt, xem đầy đủ tại run)';
             await github.rest.repos.createDispatchEvent({
-              owner: 'TanNhatCMS',
-              repo: 'QuanLyCongViec',
+              owner: context.repo.owner,
+              repo: context.repo.repo,
               event_type: 'test-report',
               client_payload: {
                 stage: 'completed',
@@ -265,16 +310,16 @@ jobs:
             });
 
             // Summary: link bấm được tới PR và thẳng tới comment lệnh
-            const prUrl = `https://github.com/TanNhatCMS/QuanLyCongViec/pull/${process.env.PR_NUMBER}`;
+            const prUrl = `https://github.com/${context.repo.owner}/${context.repo.repo}/pull/${process.env.PR_NUMBER}`;
             const rows = [
               [{ data: 'PR', header: true }, { data: 'Comment lệnh', header: true }, { data: 'Kết quả', header: true }],
               [
-                `<a href="${prUrl}">TanNhatCMS/QuanLyCongViec#${process.env.PR_NUMBER}</a>`,
+                `<a href="${prUrl}">${context.repo.owner}/${context.repo.repo}#${process.env.PR_NUMBER}</a>`,
                 process.env.COMMENT_ID
                   ? `<a href="${prUrl}#issuecomment-${process.env.COMMENT_ID}">#issuecomment-${process.env.COMMENT_ID}</a>`
                   : '— (chạy tự động, sticky comment)',
                 process.env.CONCLUSION,
               ],
             ];
-            await core.summary.addHeading('🧪 Test report → QuanLyCongViec', 3).addTable(rows).write();
-            core.info(`Report sent to TanNhatCMS/QuanLyCongViec (PR #${process.env.PR_NUMBER}, ${process.env.CONCLUSION})`);
+            await core.summary.addHeading(`🧪 Test report → ${context.repo.repo}`, 3).addTable(rows).write();
+            core.info(`Report sent to ${context.repo.owner}/${context.repo.repo} (PR #${process.env.PR_NUMBER}, ${process.env.CONCLUSION})`);

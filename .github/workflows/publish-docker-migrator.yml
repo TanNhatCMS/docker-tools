@@ -1,16 +1,59 @@
 name: Docker Publish Migrator Build
+# Reusable workflow — được caller (phu-nam-hai-jsco/task-manager) gọi qua `uses:`.
+# Build image DB migrator (Prisma migrate deploy) từ `docker/db-migrator/Dockerfile`.
 
 on:
-  repository_dispatch:
-    types: [trigger-publish-migrator]
+  workflow_call:
+    inputs:
+      ref:
+        description: 'Git ref of the caller repo to checkout/test/build'
+        type: string
+        required: false
+        default: ''
+      pr_number:
+        description: 'PR number for report/comment flows'
+        type: string
+        required: false
+        default: ''
+      comment_id:
+        description: 'Command comment id for $test-* flows'
+        type: string
+        required: false
+        default: ''
+      trigger:
+        description: 'Human-readable trigger label'
+        type: string
+        required: false
+        default: 'workflow_call'
+      version:
+        description: 'Version to tag the image with (fallback: root package.json → "dev")'
+        type: string
+        required: false
+        default: ''
+      branch:
+        description: 'Branch name — tag `latest` chỉ được push khi branch == main'
+        type: string
+        required: false
+        default: 'main'
+    secrets:
+      SUBMODULE_TOKEN:
+        description: 'PAT with repo scope to checkout private submodules + main repo'
+        required: false
+      GHCR_TOKEN:
+        description: 'Optional PAT with write:packages to push to GHCR (fallback: MAIN_REPO_CHECKOUT_TOKEN, then GITHUB_TOKEN)'
+        required: false
+      MAIN_REPO_CHECKOUT_TOKEN:
+        description: 'Optional PAT fallback for checkout + GHCR login'
+        required: false
 
 concurrency:
-  group: publish-docker-migrator-${{ github.event.client_payload.branch }}
+  group: publish-docker-migrator-${{ inputs.branch || inputs.ref || github.sha }}
   cancel-in-progress: true
 
 env:
   REGISTRY: ghcr.io
-  OWNER: tannhatcms
+  # Ảnh publish về namespace của caller repo (GITHUB_TOKEN + packages:write đủ quyền push)
+  OWNER: ${{ github.repository_owner }}
   IMAGE_NAME: qlcv-db-migrator
 
 permissions:
@@ -24,21 +67,20 @@ jobs:
     timeout-minutes: 20
 
     steps:
-      - name: Checkout Main Repository
+      - name: Checkout repository
         uses: actions/checkout@v7
         with:
-          repository: TanNhatCMS/QuanLyCongViec
-          ref: ${{ github.event.client_payload.sha }}
-          fetch-depth: 0
-          token: ${{ secrets.MAIN_REPO_CHECKOUT_TOKEN }}
-          submodules: true
+          ref: ${{ inputs.ref || github.sha }}
+          fetch-depth: 1
+          token: ${{ secrets.SUBMODULE_TOKEN || secrets.MAIN_REPO_CHECKOUT_TOKEN || github.token }}
+          submodules: recursive
 
       - name: Resolve version
         id: version
         run: |
-          if [ -n "${{ github.event.client_payload.version }}" ]; then
-            VERSION="${{ github.event.client_payload.version }}"
-            echo "Source: client_payload"
+          if [ -n "${{ inputs.version }}" ]; then
+            VERSION="${{ inputs.version }}"
+            echo "Source: workflow input"
           else
             VERSION=$(node -p "require('./package.json').version" 2>/dev/null || echo "dev")
             echo "Source: package.json"
@@ -53,7 +95,7 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ env.OWNER }}/${{ env.IMAGE_NAME }}
           tags: |
-            type=raw,value=latest,enable=${{ github.event.client_payload.branch == 'main' }}
+            type=raw,value=latest,enable=${{ inputs.branch == 'main' }}
             type=raw,value=${{ steps.version.outputs.version }}
             type=sha,prefix=sha-,format=short
 
@@ -64,8 +106,8 @@ jobs:
         uses: docker/login-action@v4
         with:
           registry: ${{ env.REGISTRY }}
-          username: ${{ env.OWNER }}
-          password: ${{ secrets.MAIN_REPO_CHECKOUT_TOKEN }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GHCR_TOKEN || secrets.MAIN_REPO_CHECKOUT_TOKEN || github.token }}
 
       - name: Build and push migrator image
         id: build

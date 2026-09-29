@@ -1,16 +1,70 @@
 name: Docker Publish Web Build
+# Reusable workflow — được caller (phu-nam-hai-jsco/task-manager) gọi qua `uses:`.
+# Build image Web (Next.js static export + nginx) từ `docker/nextjs/Dockerfile` (COPY `frontend/**`).
 
 on:
-  repository_dispatch:
-    types: [trigger-publish-web]
+  workflow_call:
+    inputs:
+      ref:
+        description: 'Git ref of the caller repo to checkout/test/build'
+        type: string
+        required: false
+        default: ''
+      pr_number:
+        description: 'PR number for report/comment flows'
+        type: string
+        required: false
+        default: ''
+      comment_id:
+        description: 'Command comment id for $test-* flows'
+        type: string
+        required: false
+        default: ''
+      trigger:
+        description: 'Human-readable trigger label'
+        type: string
+        required: false
+        default: 'workflow_call'
+      version:
+        description: 'Version to tag the image with (fallback: root package.json → "dev")'
+        type: string
+        required: false
+        default: ''
+      branch:
+        description: 'Branch name for image lane tagging (default: main lane, no prefix)'
+        type: string
+        required: false
+        default: 'main'
+      env_json:
+        description: 'JSON object of non-secret build env (BUILD_ENV, NEXT_PUBLIC_*, SENTRY_*) — khóa AG Grid license / Sentry OBS token gửi qua secrets'
+        type: string
+        required: false
+        default: ''
+    secrets:
+      SUBMODULE_TOKEN:
+        description: 'PAT with repo scope to checkout private submodules + main repo'
+        required: false
+      GHCR_TOKEN:
+        description: 'Optional PAT with write:packages to push to GHCR (fallback: MAIN_REPO_CHECKOUT_TOKEN, then GITHUB_TOKEN)'
+        required: false
+      MAIN_REPO_CHECKOUT_TOKEN:
+        description: 'Optional PAT fallback for checkout + GHCR login'
+        required: false
+      AG_GRID_LICENSE:
+        description: 'Optional AG Grid license key (NEXT_PUBLIC_AG_GRID_LICENSE build arg)'
+        required: false
+      SENTRY_OBS_API_TOKEN:
+        description: 'Optional Sentry OBS API token (SENTRY_OBS_API_TOKEN build arg)'
+        required: false
 
 concurrency:
-  group: publish-docker-web-${{ github.event.client_payload.branch }}
+  group: publish-docker-web-${{ inputs.branch || inputs.ref || github.sha }}
   cancel-in-progress: true
 
 env:
   REGISTRY: ghcr.io
-  OWNER: tannhatcms
+  # Ảnh publish về namespace của caller repo (GITHUB_TOKEN + packages:write đủ quyền push)
+  OWNER: ${{ github.repository_owner }}
 
 permissions:
   contents: read
@@ -23,21 +77,20 @@ jobs:
     timeout-minutes: 30
 
     steps:
-      - name: Checkout Main Repository
+      - name: Checkout repository
         uses: actions/checkout@v7
         with:
-          repository: TanNhatCMS/QuanLyCongViec
-          ref: ${{ github.event.client_payload.sha }}
-          fetch-depth: 0
-          token: ${{ secrets.MAIN_REPO_CHECKOUT_TOKEN }}
-          submodules: true
+          ref: ${{ inputs.ref || github.sha }}
+          fetch-depth: 1
+          token: ${{ secrets.SUBMODULE_TOKEN || secrets.MAIN_REPO_CHECKOUT_TOKEN || github.token }}
+          submodules: recursive
 
       - name: Resolve version
         id: version
         run: |
-          if [ -n "${{ github.event.client_payload.version }}" ]; then
-            VERSION="${{ github.event.client_payload.version }}"
-            echo "Source: client_payload"
+          if [ -n "${{ inputs.version }}" ]; then
+            VERSION="${{ inputs.version }}"
+            echo "Source: workflow input"
           else
             VERSION=$(node -p "require('./package.json').version" 2>/dev/null || echo "dev")
             echo "Source: package.json"
@@ -49,7 +102,7 @@ jobs:
       - name: Resolve lane prefix
         id: lane
         run: |
-          BRANCH="${{ github.event.client_payload.branch }}"
+          BRANCH="${{ inputs.branch }}"
           if [ "$BRANCH" = "main" ]; then
             echo "prefix=" >> $GITHUB_OUTPUT
             echo "suffix=" >> $GITHUB_OUTPUT
@@ -62,7 +115,7 @@ jobs:
       - name: Parse env_json
         id: env_json
         run: |
-          ENV_JSON='${{ github.event.client_payload.env_json }}'
+          ENV_JSON='${{ inputs.env_json }}'
           if [ -n "$ENV_JSON" ]; then
             echo "build_env=$(echo "$ENV_JSON" | jq -r '.BUILD_ENV // "production"')" >> $GITHUB_OUTPUT
             echo "next_public_api_base_url=$(echo "$ENV_JSON" | jq -r '.NEXT_PUBLIC_API_BASE_URL // ""')" >> $GITHUB_OUTPUT
@@ -85,25 +138,8 @@ jobs:
         uses: docker/login-action@v4
         with:
           registry: ${{ env.REGISTRY }}
-          username: ${{ env.OWNER }}
-          password: ${{ secrets.MAIN_REPO_CHECKOUT_TOKEN }}
-
-      - name: Decrypt Secrets
-        id: decrypt
-        env:
-          ENCRYPTED_PAYLOAD: ${{ github.event.client_payload.encrypted_payload }}
-          PAYLOAD_ENCRYPTION_KEY: ${{ secrets.PAYLOAD_ENCRYPTION_KEY }}
-        run: |
-          if [ -n "$ENCRYPTED_PAYLOAD" ]; then
-            echo "$ENCRYPTED_PAYLOAD" | base64 -d | openssl enc -d -aes-256-cbc -salt -pbkdf2 -pass pass:$PAYLOAD_ENCRYPTION_KEY -out decrypted.json
-
-            AG_GRID=$(jq -r '.ag_grid_license // empty' decrypted.json)
-            SENTRY=$(jq -r '.sentry_obs_api_token // empty' decrypted.json)
-            [ -n "$AG_GRID" ] && echo "::add-mask::$AG_GRID"
-            [ -n "$SENTRY" ] && echo "::add-mask::$SENTRY"
-            echo "ag_grid_license=$AG_GRID" >> $GITHUB_OUTPUT
-            echo "sentry_obs_api_token=$SENTRY" >> $GITHUB_OUTPUT
-          fi
+          username: ${{ github.actor }}
+          password: ${{ secrets.GHCR_TOKEN || secrets.MAIN_REPO_CHECKOUT_TOKEN || github.token }}
 
       - name: Docker metadata
         id: meta
@@ -143,11 +179,12 @@ jobs:
             NEXT_PUBLIC_API_BASE_URL=${{ steps.env_json.outputs.next_public_api_base_url }}
             INTERNAL_API_BASE_URL=${{ steps.env_json.outputs.internal_api_base_url }}
             NEXT_PUBLIC_DEBUG=${{ steps.env_json.outputs.next_public_debug }}
+            NEXT_PUBLIC_AG_GRID_LICENSE=${{ secrets.AG_GRID_LICENSE || steps.env_json.outputs.next_public_ag_grid_license }}
             SENTRY_DSN_WEB=${{ steps.env_json.outputs.sentry_dsn_web }}
             SENTRY_TRACES_SAMPLE_RATE_WEB_CLIENT=${{ steps.env_json.outputs.sentry_traces_sample_rate_web_client }}
             SENTRY_REPLAY_SESSION_SAMPLE_RATE_WEB=${{ steps.env_json.outputs.sentry_replay_session_sample_rate_web }}
             SENTRY_REPLAY_ON_ERROR_SAMPLE_RATE_WEB=${{ steps.env_json.outputs.sentry_replay_on_error_sample_rate_web }}
-            SENTRY_OBS_API_TOKEN=${{ steps.decrypt.outputs.sentry_obs_api_token }}
+            SENTRY_OBS_API_TOKEN=${{ secrets.SENTRY_OBS_API_TOKEN || steps.env_json.outputs.sentry_obs_api_token }}
             SENTRY_OBS_ORGANIZATION_SLUG=${{ steps.env_json.outputs.sentry_obs_organization_slug }}
             SENTRY_OBS_PROJECT_WEB=${{ steps.env_json.outputs.sentry_obs_project_web }}
 
@@ -157,7 +194,7 @@ jobs:
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "**Image:** \`${{ env.REGISTRY }}/${{ env.OWNER }}/qlcv-web\`" >> "$GITHUB_STEP_SUMMARY"
           echo "**Version:** \`${{ steps.version.outputs.version }}\`" >> "$GITHUB_STEP_SUMMARY"
-          echo "**Branch:** \`${{ github.event.client_payload.branch }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "**Branch:** \`${{ inputs.branch }}\`" >> "$GITHUB_STEP_SUMMARY"
           echo "**Digest:** \`${{ steps.build.outputs.digest }}\`" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "### Tags" >> "$GITHUB_STEP_SUMMARY"
