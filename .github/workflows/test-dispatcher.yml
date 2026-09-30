@@ -97,14 +97,12 @@ jobs:
       (github.event_name == 'repository_dispatch' && github.event.action == 'test-web') ||
       (github.event_name == 'workflow_dispatch' && inputs.test == 'web')
     needs: resolve
-    uses: ./.github/workflows/test-minimal.yml
+    uses: phu-nam-hai-jsco/task-manager-action/.github/workflows/test-web.yml@90a30fd
     secrets: inherit
     with:
       ref: ${{ needs.resolve.outputs.ref }}
-      source_repository: ${{ needs.resolve.outputs.source_repository }}
       pr_number: ${{ needs.resolve.outputs.pr_number }}
       comment_id: ${{ needs.resolve.outputs.comment_id }}
-      caller_run_url: ${{ needs.resolve.outputs.caller_run_url }}
       trigger: ${{ needs.resolve.outputs.trigger }}
 
   dotnet:
