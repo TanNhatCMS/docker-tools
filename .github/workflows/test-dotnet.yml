@@ -31,6 +31,11 @@ on:
         type: string
         required: false
         default: ''
+      source_repository:
+        description: 'Repo chứa source cần test (mặc định: repo caller; dispatcher truyền source)'
+        type: string
+        required: false
+        default: ''
       coverage_gist_id:
         description: 'Gist id để cập nhật badge coverage (chỉ chạy trên main)'
         type: string
@@ -49,11 +54,6 @@ on:
       GIST_TOKEN:
         description: 'Optional PAT để cập nhật badge coverage (gist)'
         required: false
-      source_repository:
-        description: 'Repo chứa source cần test (mặc định: repo caller; dispatcher truyền source)'
-        type: string
-        required: false
-        default: ''
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.sha }}
