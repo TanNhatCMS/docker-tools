@@ -1,10 +1,6 @@
 name: Test Minimal
 run-name: "Test Minimal · ${{ github.sha }}"
 
-concurrency:
-  group: ${{ github.workflow }}-${{ github.sha }}
-  cancel-in-progress: true
-
 permissions:
   contents: read
 on:
