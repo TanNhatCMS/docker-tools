@@ -149,12 +149,12 @@ jobs:
       - name: Detect layout (monorepo vs standalone)
         run: |
           if [ -f desktop/Cargo.toml ]; then
-            echo "DESKTOP_ROOT=database" >> "$GITHUB_ENV"
+            echo "DESKTOP_ROOT=desktop" >> "$GITHUB_ENV"
           else
             echo "DESKTOP_ROOT=." >> "$GITHUB_ENV"
           fi
 
-
+      - name: Install dependencies
         id: install
         run: pnpm install --frozen-lockfile
 
