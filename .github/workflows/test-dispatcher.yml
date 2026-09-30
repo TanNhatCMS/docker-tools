@@ -97,7 +97,7 @@ jobs:
       (github.event_name == 'repository_dispatch' && github.event.action == 'test-web') ||
       (github.event_name == 'workflow_dispatch' && inputs.test == 'web')
     needs: resolve
-    uses: phu-nam-hai-jsco/task-manager-action/.github/workflows/test-web.yml@main
+    uses: ./.github/workflows/test-minimal.yml
     secrets: inherit
     with:
       ref: ${{ needs.resolve.outputs.ref }}

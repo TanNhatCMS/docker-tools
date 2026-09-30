@@ -1,0 +1,34 @@
+name: Test Minimal
+on:
+  workflow_call:
+    inputs:
+      ref:
+        type: string
+        required: false
+        default: ''
+      source_repository:
+        type: string
+        required: false
+        default: ''
+      pr_number:
+        type: string
+        required: false
+        default: ''
+      comment_id:
+        type: string
+        required: false
+        default: ''
+      caller_run_url:
+        type: string
+        required: false
+        default: ''
+      trigger:
+        type: string
+        required: false
+        default: 'workflow_call'
+    secrets: {}
+jobs:
+  echo:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "minimal test — source=${{ inputs.source_repository }} ref=${{ inputs.ref }}"
