@@ -106,9 +106,16 @@ jobs:
           if [ "$BRANCH" = "main" ]; then
             echo "prefix=" >> $GITHUB_OUTPUT
             echo "suffix=" >> $GITHUB_OUTPUT
+            echo "name_suffix=" >> $GITHUB_OUTPUT
+          elif [ "$BRANCH" = "dev" ]; then
+            # Dev lane: suffix vao TEN image (task-manager-server-dev), tag giu sach
+            echo "prefix=" >> $GITHUB_OUTPUT
+            echo "suffix=" >> $GITHUB_OUTPUT
+            echo "name_suffix=-dev" >> $GITHUB_OUTPUT
           else
             echo "prefix=${BRANCH}-" >> $GITHUB_OUTPUT
             echo "suffix=-${BRANCH}" >> $GITHUB_OUTPUT
+            echo "name_suffix=" >> $GITHUB_OUTPUT
           fi
           echo "Branch: $BRANCH"
 
@@ -145,7 +152,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v6
         with:
-          images: ${{ env.REGISTRY }}/${{ env.OWNER }}/task-manager-packages/qlcv-web
+          images: ${{ env.REGISTRY }}/${{ env.OWNER }}/task-manager-packages/task-manager-web${{ steps.lane.outputs.name_suffix }}
           labels: |
             org.opencontainers.image.source=https://github.com/${{ github.repository_owner }}/task-manager-packages
           flavor: |
@@ -168,10 +175,10 @@ jobs:
           # Layer deps (pnpm install) được giữ cache qua registry buildcache + gha
           # để không phải reinstall khi pnpm-lock.yaml không đổi.
           cache-from: |
-            type=registry,ref=${{ env.REGISTRY }}/${{ env.OWNER }}/task-manager-packages/qlcv-web:buildcache${{ steps.lane.outputs.suffix }}
+            type=registry,ref=${{ env.REGISTRY }}/${{ env.OWNER }}/task-manager-packages/task-manager-web${{ steps.lane.outputs.name_suffix }}:buildcache${{ steps.lane.outputs.suffix }}
             type=gha,mode=max,scope=publish-web
           cache-to: |
-            type=registry,ref=${{ env.REGISTRY }}/${{ env.OWNER }}/task-manager-packages/qlcv-web:buildcache${{ steps.lane.outputs.suffix }},mode=max
+            type=registry,ref=${{ env.REGISTRY }}/${{ env.OWNER }}/task-manager-packages/task-manager-web${{ steps.lane.outputs.name_suffix }}:buildcache${{ steps.lane.outputs.suffix }},mode=max
             type=gha,mode=max,scope=publish-web
           provenance: false
           sbom: false
@@ -194,7 +201,7 @@ jobs:
         run: |
           echo "## 🌐 Web Image Published" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "**Image:** \`${{ env.REGISTRY }}/${{ env.OWNER }}/task-manager-packages/qlcv-web\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "**Image:** \`${{ env.REGISTRY }}/${{ env.OWNER }}/task-manager-packages/task-manager-web${{ steps.lane.outputs.name_suffix }}\`" >> "$GITHUB_STEP_SUMMARY"
           echo "**Version:** \`${{ steps.version.outputs.version }}\`" >> "$GITHUB_STEP_SUMMARY"
           echo "**Branch:** \`${{ inputs.branch }}\`" >> "$GITHUB_STEP_SUMMARY"
           echo "**Digest:** \`${{ steps.build.outputs.digest }}\`" >> "$GITHUB_STEP_SUMMARY"

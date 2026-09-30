@@ -54,7 +54,7 @@ env:
   REGISTRY: ghcr.io
   # Ảnh publish về namespace của caller repo (GITHUB_TOKEN + packages:write đủ quyền push)
   OWNER: ${{ github.repository_owner }}
-  IMAGE_NAME: task-manager-packages/qlcv-db-migrator
+  IMAGE_NAME: task-manager-packages/task-manager-migrator
 
 permissions:
   contents: read
@@ -93,11 +93,11 @@ jobs:
         id: meta
         uses: docker/metadata-action@v6
         with:
-          images: ${{ env.REGISTRY }}/${{ env.OWNER }}/${{ env.IMAGE_NAME }}
+          images: ${{ env.REGISTRY }}/${{ env.OWNER }}/task-manager-packages/task-manager-migrator${{ inputs.branch == 'dev' && '-dev' || '' }}
           labels: |
             org.opencontainers.image.source=https://github.com/${{ github.repository_owner }}/task-manager-packages
           tags: |
-            type=raw,value=latest,enable=${{ inputs.branch == 'main' }}
+            type=raw,value=latest,enable=${{ inputs.branch == 'main' || inputs.branch == 'dev' }}
             type=raw,value=${{ steps.version.outputs.version }}
             type=sha,prefix=sha-,format=short
 
@@ -122,7 +122,7 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: |
-            type=registry,ref=${{ env.REGISTRY }}/${{ env.OWNER }}/${{ env.IMAGE_NAME }}:latest
+            type=registry,ref=${{ env.REGISTRY }}/${{ env.OWNER }}/${{ env.IMAGE_NAME }}${{ inputs.branch == 'dev' && '-dev' || '' }}:latest
             type=gha,scope=publish-migrator
           cache-to: type=gha,mode=max,scope=publish-migrator
           provenance: false
@@ -134,7 +134,7 @@ jobs:
         run: |
           echo "## 🐳 DB Migrator Image Published" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "**Image:** \`${{ env.REGISTRY }}/${{ env.OWNER }}/${{ env.IMAGE_NAME }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "**Image:** \`${{ env.REGISTRY }}/${{ env.OWNER }}/${{ env.IMAGE_NAME }}${{ inputs.branch == 'dev' && '-dev' || '' }}\`" >> "$GITHUB_STEP_SUMMARY"
           echo "**Version:** \`${{ steps.version.outputs.version }}\`" >> "$GITHUB_STEP_SUMMARY"
           echo "**Digest:** \`${{ steps.build.outputs.digest }}\`" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
