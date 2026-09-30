@@ -56,6 +56,10 @@ permissions:
   contents: read
 
 concurrency:
+  group: dispatcher-${{ github.event.action || github.event.inputs.test || 'manual' }}-${{ github.event.client_payload.source_repository || github.event.inputs.source_repository || github.repository }}-${{ github.event.client_payload.ref || github.event.inputs.ref || github.sha }}
+  cancel-in-progress: false
+
+concurrency:
   group: ${{ github.workflow }}-${{ github.sha }}
   cancel-in-progress: false
 

@@ -1,6 +1,8 @@
 name: Test Web
 # Reusable workflow — được caller (phu-nam-hai-jsco/task-manager) gọi qua `uses:`.
 # run-name: workflow gọi · repo gọi · PR/ref · trigger — nhìn là biết nguồn chạy.
+run-name: "${{ github.workflow }} · ${{ github.sha }}"
+
 on:
   workflow_call:
     inputs:
@@ -61,8 +63,216 @@ jobs:
     name: Web Test
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    env:
+      PR_NUMBER: ${{ inputs.pr_number }}
+      HEAD_SHA: ${{ inputs.ref }}
+      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+      HAS_GIST_TOKEN: ${{ secrets.GIST_TOKEN != '' }}
+      # Caller repo context (reusable workflow chạy với context của caller)
+      MAIN_REPO: ${{ inputs.source_repository || github.repository }}
+      STATUS_CONTEXT: Web Test
     steps:
+      - name: Set pending status on caller repo commit
+        if: env.HEAD_SHA != ''
+        env:
+          GH_TOKEN: ${{ secrets.MAIN_REPO_PR_TOKEN || secrets.MAIN_REPO_CHECKOUT_TOKEN }}
+        run: |
+          gh api "repos/$MAIN_REPO/statuses/$HEAD_SHA" \
+            -f state=pending -f target_url="$RUN_URL" \
+            -f description="Web Test in progress..." -f context="$STATUS_CONTEXT" --silent \
+            || echo "::warning::Không thể set pending status trên $MAIN_REPO@$HEAD_SHA"
 
       # Lệnh từ comment `$test-*`: báo caller repo đã bắt đầu chạy → test-report.yml thả 🚀
-      - name: P1 echo
-        run: echo "P1 truncated test-web"
+      - name: Notify started
+        if: env.PR_NUMBER != '' && inputs.comment_id != ''
+        continue-on-error: true
+        uses: actions/github-script@v9
+        env:
+          COMMENT_ID: ${{ inputs.comment_id }}
+        with:
+          github-token: ${{ secrets.MAIN_REPO_PR_TOKEN || secrets.MAIN_REPO_CHECKOUT_TOKEN }}
+          script: |
+            const [owner, repo] = process.env.MAIN_REPO.split('/');
+            await github.rest.repos.createDispatchEvent({
+              owner: owner,
+              repo: repo,
+              event_type: 'test-report',
+              client_payload: {
+                stage: 'started',
+                pr_number: process.env.PR_NUMBER,
+                comment_id: process.env.COMMENT_ID,
+                header: 'web-coverage',
+                run_url: process.env.RUN_URL,
+              },
+            });
+
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ inputs.source_repository || github.repository }}
+          ref: ${{ inputs.ref || github.sha }}
+          fetch-depth: 1
+          token: ${{ secrets.SUBMODULE_TOKEN || secrets.MAIN_REPO_CHECKOUT_TOKEN || github.token }}
+          submodules: recursive
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          cache: "pnpm"
+
+      - name: Detect layout (monorepo vs standalone)
+        run: |
+          if [ -f frontend/package.json ]; then
+            echo "WEB_ROOT=frontend" >> "$GITHUB_ENV"
+          else
+            echo "WEB_ROOT=." >> "$GITHUB_ENV"
+          fi
+
+      - name: Install dependencies
+        id: install
+        run: pnpm install --frozen-lockfile
+
+      - name: Check inline styles
+        id: inline_styles
+        run: pnpm run --if-present lint:inline-styles
+
+      - name: Run tests with coverage
+        id: tests
+        run: pnpm --filter @qlcv/web run test --coverage
+
+      - name: Code Coverage Summary
+        uses: irongut/CodeCoverageSummary@v1.3.0
+        with:
+          filename: ${{ env.WEB_ROOT }}/coverage/cobertura-coverage.xml
+          badge: true
+          fail_below_min: false
+          format: markdown
+          hide_branch_rate: false
+          hide_complexity: true
+          indicators: true
+          output: both
+          thresholds: "50 75"
+
+      - name: Extract coverage percentage
+        id: coverage
+        run: |
+          COVERAGE=$(grep -oP 'line-rate="\K[^"]+' "$WEB_ROOT/coverage/cobertura-coverage.xml" | head -1)
+          COVERAGE_PCT=$(echo "$COVERAGE * 100" | bc | xargs printf "%.1f")
+          echo "percentage=${COVERAGE_PCT}" >> $GITHUB_OUTPUT
+          echo "Web Coverage: ${COVERAGE_PCT}%"
+
+      - name: Update coverage badge (Gist)
+        if: inputs.ref == 'main' && inputs.coverage_gist_id != '' && env.HAS_GIST_TOKEN == 'true'
+        uses: schneegans/dynamic-badges-action@v1.9.0
+        with:
+          auth: ${{ secrets.GIST_TOKEN }}
+          gistID: ${{ inputs.coverage_gist_id }}
+          filename: web-coverage.json
+          label: Web coverage
+          message: "${{ steps.coverage.outputs.percentage }}%"
+          valColorRange: ${{ steps.coverage.outputs.percentage }}
+          minColorRange: 50
+          maxColorRange: 90
+
+      - name: Upload coverage reports
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: web-coverage-reports
+          path: ${{ env.WEB_ROOT }}/coverage/cobertura-coverage.xml
+          retention-days: 7
+          if-no-files-found: ignore
+
+      - name: Build PR report
+        if: always() && env.PR_NUMBER != ''
+        env:
+          JOB_STATUS: ${{ job.status }}
+          TRIGGER: ${{ inputs.trigger }}
+          CALLER_RUN_URL: ${{ inputs.caller_run_url }}
+          INSTALL: ${{ steps.install.outcome }}
+          INLINE_STYLES: ${{ steps.inline_styles.outcome }}
+          TESTS: ${{ steps.tests.outcome }}
+        run: |
+          icon() { case "$1" in success) echo "✅ Passed";; failure) echo "❌ Failed";; cancelled) echo "🚫 Cancelled";; *) echo "⏭️ Skipped";; esac; }
+          [ "$JOB_STATUS" = "success" ] && RESULT="✅ Passed" || RESULT="❌ $JOB_STATUS"
+          {
+            echo "## 🧪 Web Test — $RESULT"
+            echo
+            echo "| Step | Result |"
+            echo "|------|--------|"
+            echo "| Install dependencies | $(icon "$INSTALL") |"
+            echo "| Inline styles | $(icon "$INLINE_STYLES") |"
+            echo "| Vitest | $(icon "$TESTS") |"
+            echo
+            if [ -f code-coverage-results.md ]; then
+              sed 's/Code Coverage/Web Coverage/g' code-coverage-results.md
+              echo
+            fi
+            CALLER=""
+            [ -n "$CALLER_RUN_URL" ] && CALLER=" · [caller run](${CALLER_RUN_URL})"
+            echo "<sub>🔗 [workflow run #${GITHUB_RUN_NUMBER}](${RUN_URL})${CALLER} · commit ${HEAD_SHA} · trigger: ${TRIGGER} · $(date -u '+%Y-%m-%d %H:%M UTC')</sub>"
+          } > pr-report.md
+
+      - name: Set final status on caller repo commit
+        if: always() && env.HEAD_SHA != ''
+        env:
+          GH_TOKEN: ${{ secrets.MAIN_REPO_PR_TOKEN || secrets.MAIN_REPO_CHECKOUT_TOKEN }}
+          STATE: ${{ job.status == 'success' && 'success' || 'failure' }}
+        run: |
+          gh api "repos/$MAIN_REPO/statuses/$HEAD_SHA" \
+            -f state="$STATE" -f target_url="$RUN_URL" \
+            -f description="$STATUS_CONTEXT $STATE" -f context="$STATUS_CONTEXT" --silent \
+            || echo "::warning::Không thể set final status trên $MAIN_REPO@$HEAD_SHA"
+
+      # Không comment trực tiếp bằng PAT (comment sẽ mang tên user → ci-dispatcher coi là người).
+      # Gửi báo cáo về caller repo qua createDispatchEvent 'test-report'; workflow test-report.yml
+      # ở caller repo đăng comment (sticky, hoặc quote-reply comment lệnh) + thả 👍/👎 bằng GITHUB_TOKEN
+      # (github-actions[bot]).
+      - name: Send report to caller repo
+        if: always() && env.PR_NUMBER != ''
+        uses: actions/github-script@v9
+        env:
+          COMMENT_ID: ${{ inputs.comment_id }}
+          CONCLUSION: ${{ job.status }}
+        with:
+          github-token: ${{ secrets.MAIN_REPO_PR_TOKEN || secrets.MAIN_REPO_CHECKOUT_TOKEN }}
+          script: |
+            const [owner, repo] = process.env.MAIN_REPO.split('/');
+            const fs = require('fs');
+            let body = fs.existsSync('pr-report.md') ? fs.readFileSync('pr-report.md', 'utf8') : '';
+            if (!body) body = `## 🧪 web-coverage — ❌ ${process.env.CONCLUSION}\n\nKhông tạo được báo cáo: ${process.env.RUN_URL}`;
+            // Dispatch event giới hạn kích thước payload → cắt bớt báo cáo quá dài
+            if (body.length > 60000) body = body.slice(0, 60000) + '\n\n…(báo cáo bị cắt, xem đầy đủ tại run)';
+            await github.rest.repos.createDispatchEvent({
+              owner: owner,
+              repo: repo,
+              event_type: 'test-report',
+              client_payload: {
+                stage: 'completed',
+                pr_number: process.env.PR_NUMBER,
+                comment_id: process.env.COMMENT_ID || '',
+                header: 'web-coverage',
+                conclusion: process.env.CONCLUSION,
+                run_url: process.env.RUN_URL,
+                body,
+              },
+            });
+
+            // Summary: link bấm được tới PR và thẳng tới comment lệnh
+            const prUrl = `https://github.com/${owner}/${repo}/pull/${process.env.PR_NUMBER}`;
+            const rows = [
+              [{ data: 'PR', header: true }, { data: 'Comment lệnh', header: true }, { data: 'Kết quả', header: true }],
+              [
+                `<a href="${prUrl}">${owner}/${repo}#${process.env.PR_NUMBER}</a>`,
+                process.env.COMMENT_ID
+                  ? `<a href="${prUrl}#issuecomment-${process.env.COMMENT_ID}">#issuecomment-${process.env.COMMENT_ID}</a>`
+                  : '— (chạy tự động, sticky comment)',
+                process.env.CONCLUSION,
+              ],
+            ];
+            await core.summary.addHeading(`🧪 Test report → ${repo}`, 3).addTable(rows).write();
+            core.info(`Report sent to ${owner}/${repo} (PR #${process.env.PR_NUMBER}, ${process.env.CONCLUSION})`);
