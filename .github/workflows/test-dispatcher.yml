@@ -98,11 +98,7 @@ jobs:
       (github.event_name == 'workflow_dispatch' && inputs.test == 'web')
     needs: resolve
     uses: ./.github/workflows/test-web.yml
-    secrets:
-      SUBMODULE_TOKEN: ${{ secrets.SUBMODULE_TOKEN }}
-      MAIN_REPO_CHECKOUT_TOKEN: ${{ secrets.SUBMODULE_TOKEN }}
-      MAIN_REPO_PR_TOKEN: ${{ secrets.SUBMODULE_TOKEN }}
-      GIST_TOKEN: ${{ secrets.GIST_TOKEN }}
+    secrets: inherit
     with:
       ref: ${{ needs.resolve.outputs.ref }}
       source_repository: ${{ needs.resolve.outputs.source_repository }}
@@ -117,11 +113,7 @@ jobs:
       (github.event_name == 'workflow_dispatch' && inputs.test == 'dotnet')
     needs: resolve
     uses: ./.github/workflows/test-dotnet.yml
-    secrets:
-      SUBMODULE_TOKEN: ${{ secrets.SUBMODULE_TOKEN }}
-      MAIN_REPO_CHECKOUT_TOKEN: ${{ secrets.SUBMODULE_TOKEN }}
-      MAIN_REPO_PR_TOKEN: ${{ secrets.SUBMODULE_TOKEN }}
-      GIST_TOKEN: ${{ secrets.GIST_TOKEN }}
+    secrets: inherit
     with:
       ref: ${{ needs.resolve.outputs.ref }}
       source_repository: ${{ needs.resolve.outputs.source_repository }}
@@ -136,11 +128,7 @@ jobs:
       (github.event_name == 'workflow_dispatch' && inputs.test == 'desktop')
     needs: resolve
     uses: ./.github/workflows/test-desktop.yml
-    secrets:
-      SUBMODULE_TOKEN: ${{ secrets.SUBMODULE_TOKEN }}
-      MAIN_REPO_CHECKOUT_TOKEN: ${{ secrets.SUBMODULE_TOKEN }}
-      MAIN_REPO_PR_TOKEN: ${{ secrets.SUBMODULE_TOKEN }}
-      GIST_TOKEN: ${{ secrets.GIST_TOKEN }}
+    secrets: inherit
     with:
       ref: ${{ needs.resolve.outputs.ref }}
       source_repository: ${{ needs.resolve.outputs.source_repository }}
@@ -155,11 +143,7 @@ jobs:
       (github.event_name == 'workflow_dispatch' && inputs.test == 'database')
     needs: resolve
     uses: ./.github/workflows/test-database.yml
-    secrets:
-      SUBMODULE_TOKEN: ${{ secrets.SUBMODULE_TOKEN }}
-      MAIN_REPO_CHECKOUT_TOKEN: ${{ secrets.SUBMODULE_TOKEN }}
-      MAIN_REPO_PR_TOKEN: ${{ secrets.SUBMODULE_TOKEN }}
-      GIST_TOKEN: ${{ secrets.GIST_TOKEN }}
+    secrets: inherit
     with:
       ref: ${{ needs.resolve.outputs.ref }}
       source_repository: ${{ needs.resolve.outputs.source_repository }}
