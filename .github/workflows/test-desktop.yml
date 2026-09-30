@@ -1,7 +1,7 @@
 name: Test Desktop (Rust)
 # Reusable workflow — được caller (phu-nam-hai-jsco/task-manager) gọi qua `uses:`.
-# run-name chứa ref để phân biệt các lần chạy.
-run-name: "${{ github.workflow }} · ${{ inputs.ref || github.sha }}"
+# run-name: workflow gọi · repo gọi · PR/ref · trigger — nhìn là biết nguồn chạy.
+run-name: "${{ github.workflow }} · ${{ github.repository }} · ${{ inputs.pr_number != '' && format('PR #{0}', inputs.pr_number) || github.head_ref || github.ref_name }} · ${{ inputs.trigger }}"
 
 on:
   workflow_call:

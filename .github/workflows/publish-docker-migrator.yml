@@ -1,4 +1,5 @@
 name: Docker Publish Migrator Build
+run-name: "${{ github.workflow }} · ${{ inputs.source_repository || github.repository }} · ${{ inputs.branch || 'main' }} · tag ${{ inputs.version || 'auto' }}"
 # Reusable workflow — được caller (phu-nam-hai-jsco/task-manager) gọi qua `uses:`.
 # Build image DB migrator (Prisma migrate deploy) từ `docker/db-migrator/Dockerfile`.
 
