@@ -1,8 +1,6 @@
 name: Test Web
 # Reusable workflow — được caller (phu-nam-hai-jsco/task-manager) gọi qua `uses:`.
 # run-name: workflow gọi · repo gọi · PR/ref · trigger — nhìn là biết nguồn chạy.
-run-name: "${{ github.workflow }} · ${{ github.sha }}"
-
 on:
   workflow_call:
     inputs:
