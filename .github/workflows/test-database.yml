@@ -1,7 +1,7 @@
 name: Test Database
 # Reusable workflow — được caller (phu-nam-hai-jsco/task-manager) gọi qua `uses:`.
 # run-name: workflow gọi · repo gọi · PR/ref · trigger — nhìn là biết nguồn chạy.
-run-name: "${{ github.workflow }} · ${{ github.repository }} · ${{ inputs.pr_number != '' && format('PR #{0}', inputs.pr_number) || github.head_ref || github.ref_name }} · ${{ inputs.trigger }}"
+run-name: "${{ github.workflow }} · ${{ github.sha }}"
 
 on:
   workflow_call:
@@ -48,16 +48,11 @@ on:
         default: ''
 
 concurrency:
-  group: test-database-${{ inputs.pr_number || inputs.ref || github.sha }}
+  group: ${{ github.workflow }}-${{ github.sha }}
   cancel-in-progress: true
 
 permissions:
   contents: read
-
-env:
-  # Caller repo context (reusable workflow chạy với context của caller)
-  MAIN_REPO: ${{ inputs.source_repository || github.repository }}
-  STATUS_CONTEXT: Database Test
 
 jobs:
   test:
@@ -90,7 +85,9 @@ jobs:
       DATABASE_USER: "root"
       DATABASE_PASSWORD: "test"
       DATABASE_NAME: "test_qlcv"
-
+      # Caller repo context (reusable workflow chạy với context của caller)
+      MAIN_REPO: ${{ inputs.source_repository || github.repository }}
+      STATUS_CONTEXT: Database Test
     steps:
       - name: Set pending status on caller repo commit
         if: env.HEAD_SHA != ''

@@ -17,7 +17,7 @@
 # =============================================================================
 
 name: Test Dispatcher
-run-name: "Test Dispatcher · ${{ github.event.action || inputs.test }} · ${{ github.event.client_payload.source_repository || inputs.source_repository }}"
+run-name: "${{ github.workflow }} · ${{ github.sha }}"
 
 on:
   repository_dispatch:
@@ -56,7 +56,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: dispatcher-${{ github.event.action || inputs.test }}-${{ github.event.client_payload.ref || inputs.ref || github.event.client_payload.source_repository || inputs.source_repository }}-${{ github.event.client_payload.pr_number || inputs.pr_number }}
+  group: ${{ github.workflow }}-${{ github.sha }}
   cancel-in-progress: false
 
 jobs:

@@ -1,7 +1,7 @@
 name: Test Web
 # Reusable workflow — được caller (phu-nam-hai-jsco/task-manager) gọi qua `uses:`.
 # run-name: workflow gọi · repo gọi · PR/ref · trigger — nhìn là biết nguồn chạy.
-run-name: "${{ github.workflow }} · ${{ github.repository }} · ${{ inputs.pr_number != '' && format('PR #{0}', inputs.pr_number) || github.head_ref || github.ref_name }} · ${{ inputs.trigger }}"
+run-name: "${{ github.workflow }} · ${{ github.sha }}"
 
 on:
   workflow_call:
@@ -56,16 +56,11 @@ on:
         default: ''
 
 concurrency:
-  group: test-web-${{ inputs.pr_number || inputs.ref || github.sha }}
+  group: ${{ github.workflow }}-${{ github.sha }}
   cancel-in-progress: true
 
 permissions:
   contents: read
-
-env:
-  # Caller repo context (reusable workflow chạy với context của caller)
-  MAIN_REPO: ${{ inputs.source_repository || github.repository }}
-  STATUS_CONTEXT: Web Test
 
 jobs:
   test:
@@ -77,7 +72,9 @@ jobs:
       HEAD_SHA: ${{ inputs.ref }}
       RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
       HAS_GIST_TOKEN: ${{ secrets.GIST_TOKEN != '' }}
-
+      # Caller repo context (reusable workflow chạy với context của caller)
+      MAIN_REPO: ${{ inputs.source_repository || github.repository }}
+      STATUS_CONTEXT: Web Test
     steps:
       - name: Set pending status on caller repo commit
         if: env.HEAD_SHA != ''

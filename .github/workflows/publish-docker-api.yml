@@ -1,5 +1,5 @@
 name: Docker Publish API Build
-run-name: "${{ github.workflow }} · ${{ inputs.source_repository || github.repository }} · ${{ inputs.branch || 'main' }} · tag ${{ inputs.version || 'auto' }}"
+run-name: "${{ github.workflow }} · ${{ github.sha }}"
 # Reusable workflow — được caller (phu-nam-hai-jsco/task-manager) gọi qua `uses:`.
 # Build image API (.NET) từ `docker/dotnet/Dockerfile` (COPY `server/**`) của caller repo.
 
@@ -56,7 +56,7 @@ on:
         required: false
 
 concurrency:
-  group: publish-docker-api-${{ inputs.branch || inputs.ref || github.sha }}
+  group: ${{ github.workflow }}-${{ github.sha }}
   cancel-in-progress: true
 
 env:

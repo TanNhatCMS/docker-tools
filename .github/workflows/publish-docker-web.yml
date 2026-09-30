@@ -1,5 +1,5 @@
 name: Docker Publish Web Build
-run-name: "${{ github.workflow }} · ${{ inputs.source_repository || github.repository }} · ${{ inputs.branch || 'main' }} · tag ${{ inputs.version || 'auto' }}"
+run-name: "${{ github.workflow }} · ${{ github.sha }}"
 # Reusable workflow — được caller (phu-nam-hai-jsco/task-manager) gọi qua `uses:`.
 # Build image Web (Next.js static export + nginx) từ `docker/nextjs/Dockerfile` (COPY `frontend/**`).
 
@@ -64,7 +64,7 @@ on:
         required: false
 
 concurrency:
-  group: publish-docker-web-${{ inputs.branch || inputs.ref || github.sha }}
+  group: ${{ github.workflow }}-${{ github.sha }}
   cancel-in-progress: true
 
 env:
