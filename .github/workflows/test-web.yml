@@ -67,24 +67,8 @@ jobs:
     name: Web Test
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    env:
-      PR_NUMBER: ${{ inputs.pr_number }}
-      HEAD_SHA: ${{ inputs.ref }}
-      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-      HAS_GIST_TOKEN: ${{ secrets.GIST_TOKEN != '' }}
-      # Caller repo context (reusable workflow chạy với context của caller)
-      MAIN_REPO: ${{ inputs.source_repository || github.repository }}
-      STATUS_CONTEXT: Web Test
     steps:
-      - name: Set pending status on caller repo commit
-        if: env.HEAD_SHA != ''
-        env:
-          GH_TOKEN: ${{ secrets.MAIN_REPO_PR_TOKEN || secrets.MAIN_REPO_CHECKOUT_TOKEN }}
-        run: |
-          gh api "repos/$MAIN_REPO/statuses/$HEAD_SHA" \
-            -f state=pending -f target_url="$RUN_URL" \
-            -f description="Web Test in progress..." -f context="$STATUS_CONTEXT" --silent \
-            || echo "::warning::Không thể set pending status trên $MAIN_REPO@$HEAD_SHA"
+    steps:
 
       # Lệnh từ comment `$test-*`: báo caller repo đã bắt đầu chạy → test-report.yml thả 🚀
       - name: P1 echo
