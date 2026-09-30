@@ -53,10 +53,6 @@ on:
         description: 'Optional PAT để cập nhật badge coverage (gist)'
         required: false
 
-concurrency:
-  group: ${{ github.workflow }}-${{ github.sha }}
-  cancel-in-progress: true
-
 permissions:
   contents: read
 
