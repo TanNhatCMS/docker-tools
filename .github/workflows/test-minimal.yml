@@ -1,6 +1,4 @@
 name: Test Minimal
-permissions:
-  contents: read
 on:
   workflow_call:
     inputs:
