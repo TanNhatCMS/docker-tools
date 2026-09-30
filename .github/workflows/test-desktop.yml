@@ -49,6 +49,11 @@ on:
       GIST_TOKEN:
         description: 'Optional PAT để cập nhật badge coverage (gist)'
         required: false
+      source_repository:
+        description: 'Repo chứa source cần test (mặc định: repo caller; dispatcher truyền source)'
+        type: string
+        required: false
+        default: ''
 
 concurrency:
   group: test-desktop-${{ inputs.pr_number || inputs.ref || github.sha }}
@@ -59,7 +64,7 @@ permissions:
 
 env:
   # Caller repo context (reusable workflow chạy với context của caller)
-  MAIN_REPO: ${{ github.repository }}
+  MAIN_REPO: ${{ inputs.source_repository || github.repository }}
   STATUS_CONTEXT: Desktop Test
   CARGO_TERM_COLOR: always
   CARGO_INCREMENTAL: '0'
@@ -99,9 +104,10 @@ jobs:
         with:
           github-token: ${{ secrets.MAIN_REPO_PR_TOKEN || secrets.MAIN_REPO_CHECKOUT_TOKEN }}
           script: |
+            const [owner, repo] = process.env.MAIN_REPO.split('/');
             await github.rest.repos.createDispatchEvent({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
+              owner: owner,
+              repo: repo,
               event_type: 'test-report',
               client_payload: {
                 stage: 'started',
@@ -115,6 +121,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v7
         with:
+          repository: ${{ inputs.source_repository || github.repository }}
           ref: ${{ inputs.ref || github.sha }}
           fetch-depth: 1
           token: ${{ secrets.SUBMODULE_TOKEN || secrets.MAIN_REPO_CHECKOUT_TOKEN || github.token }}
@@ -305,14 +312,15 @@ jobs:
         with:
           github-token: ${{ secrets.MAIN_REPO_PR_TOKEN || secrets.MAIN_REPO_CHECKOUT_TOKEN }}
           script: |
+            const [owner, repo] = process.env.MAIN_REPO.split('/');
             const fs = require('fs');
             let body = fs.existsSync('pr-report.md') ? fs.readFileSync('pr-report.md', 'utf8') : '';
             if (!body) body = `## 🧪 desktop-coverage — ❌ ${process.env.CONCLUSION}\n\nKhông tạo được báo cáo: ${process.env.RUN_URL}`;
             // Dispatch event giới hạn kích thước payload → cắt bớt báo cáo quá dài
             if (body.length > 60000) body = body.slice(0, 60000) + '\n\n…(báo cáo bị cắt, xem đầy đủ tại run)';
             await github.rest.repos.createDispatchEvent({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
+              owner: owner,
+              repo: repo,
               event_type: 'test-report',
               client_payload: {
                 stage: 'completed',
@@ -326,16 +334,16 @@ jobs:
             });
 
             // Summary: link bấm được tới PR và thẳng tới comment lệnh
-            const prUrl = `https://github.com/${context.repo.owner}/${context.repo.repo}/pull/${process.env.PR_NUMBER}`;
+            const prUrl = `https://github.com/${owner}/${repo}/pull/${process.env.PR_NUMBER}`;
             const rows = [
               [{ data: 'PR', header: true }, { data: 'Comment lệnh', header: true }, { data: 'Kết quả', header: true }],
               [
-                `<a href="${prUrl}">${context.repo.owner}/${context.repo.repo}#${process.env.PR_NUMBER}</a>`,
+                `<a href="${prUrl}">${owner}/${repo}#${process.env.PR_NUMBER}</a>`,
                 process.env.COMMENT_ID
                   ? `<a href="${prUrl}#issuecomment-${process.env.COMMENT_ID}">#issuecomment-${process.env.COMMENT_ID}</a>`
                   : '— (chạy tự động, sticky comment)',
                 process.env.CONCLUSION,
               ],
             ];
-            await core.summary.addHeading(`🧪 Test report → ${context.repo.repo}`, 3).addTable(rows).write();
-            core.info(`Report sent to ${context.repo.owner}/${context.repo.repo} (PR #${process.env.PR_NUMBER}, ${process.env.CONCLUSION})`);
+            await core.summary.addHeading(`🧪 Test report → ${repo}`, 3).addTable(rows).write();
+            core.info(`Report sent to ${owner}/${repo} (PR #${process.env.PR_NUMBER}, ${process.env.CONCLUSION})`);

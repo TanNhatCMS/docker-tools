@@ -1,0 +1,169 @@
+# =============================================================================
+# task-manager-action — Test Dispatcher
+# =============================================================================
+# Mô hình "chạy chính": các repo (task-manager + task-manager-{frontend,desktop,
+# database,docker}) KHÔNG tự chạy test nữa mà gửi repository_dispatch sang đây.
+# Run được ghi nhận + chạy + lưu log ngay tại repo này (tab Actions tập trung 1 chỗ).
+#
+# Trigger:
+#   - repository_dispatch: test-web | test-dotnet | test-desktop | test-database
+#     client_payload: { source_repository, ref, pr_number, comment_id,
+#                       caller_run_url, trigger }
+#   - workflow_dispatch thủ công (chọn test + repo + ref/branch)
+#
+# Reusable được gọi với source_repository chỉ rõ để checkout đúng repo nguồn
+# (mặc định của reusable là repo caller — dispatcher luôn truyền tường minh).
+# Secrets: dùng SUBMODULE_TOKEN cho cả checkout lẫn status/comment (org secret).
+# =============================================================================
+
+name: Test Dispatcher
+run-name: "Test Dispatcher · ${{ github.event.action || inputs.test }} · ${{ github.event.client_payload.source_repository || inputs.source_repository }}"
+
+on:
+  repository_dispatch:
+    types: [test-web, test-dotnet, test-desktop, test-database]
+  workflow_dispatch:
+    inputs:
+      test:
+        description: 'Test cần chạy'
+        required: true
+        type: choice
+        options: [web, dotnet, desktop, database]
+      source_repository:
+        description: 'Repo chứa source (owner/name)'
+        required: true
+        type: string
+        default: phu-nam-hai-jsco/task-manager
+      ref:
+        description: 'Commit SHA cần test (bỏ trống = head của branch)'
+        required: false
+        type: string
+      branch:
+        description: 'Branch để resolve head khi bỏ trống ref'
+        required: false
+        type: string
+        default: main
+      pr_number:
+        description: 'PR number (tuỳ chọn — cho báo cáo về PR)'
+        required: false
+        type: string
+      comment_id:
+        description: 'Comment id lệnh $test-* (tuỳ chọn)'
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dispatcher-${{ github.event.action || inputs.test }}-${{ github.event.client_payload.ref || inputs.ref || github.event.client_payload.source_repository || inputs.source_repository }}-${{ github.event.client_payload.pr_number || inputs.pr_number }}
+  cancel-in-progress: false
+
+jobs:
+  resolve:
+    name: Resolve source ref
+    runs-on: ubuntu-latest
+    outputs:
+      ref: ${{ steps.ref.outputs.ref }}
+      source_repository: ${{ steps.ref.outputs.source_repository }}
+      pr_number: ${{ steps.ref.outputs.pr_number }}
+      comment_id: ${{ steps.ref.outputs.comment_id }}
+      caller_run_url: ${{ steps.ref.outputs.caller_run_url }}
+      trigger: ${{ steps.ref.outputs.trigger }}
+    steps:
+      - name: Resolve
+        id: ref
+        env:
+          GH_TOKEN: ${{ secrets.SUBMODULE_TOKEN }}
+        run: |
+          SOURCE="${{ github.event.client_payload.source_repository || inputs.source_repository }}"
+          REF="${{ github.event.client_payload.ref || inputs.ref || '' }}"
+          if [ -z "$REF" ]; then
+            BRANCH="${{ github.event.client_payload.branch || inputs.branch || 'main' }}"
+            REF=$(gh api "repos/$SOURCE/branches/$BRANCH" --jq .commit.sha)
+            echo "Resolved $SOURCE@$BRANCH head: $REF"
+          fi
+          {
+            echo "ref=$REF"
+            echo "source_repository=$SOURCE"
+            echo "pr_number=${{ github.event.client_payload.pr_number || inputs.pr_number || '' }}"
+            echo "comment_id=${{ github.event.client_payload.comment_id || inputs.comment_id || '' }}"
+            echo "caller_run_url=${{ github.event.client_payload.caller_run_url || '' }}"
+            echo "trigger=${{ github.event.client_payload.trigger || inputs.trigger || github.event.action || 'manual' }}"
+          } >> "$GITHUB_OUTPUT"
+
+  web:
+    if: >-
+      (github.event_name == 'repository_dispatch' && github.event.action == 'test-web') ||
+      (github.event_name == 'workflow_dispatch' && inputs.test == 'web')
+    needs: resolve
+    uses: ./.github/workflows/test-web.yml
+    secrets:
+      SUBMODULE_TOKEN: ${{ secrets.SUBMODULE_TOKEN }}
+      MAIN_REPO_CHECKOUT_TOKEN: ${{ secrets.SUBMODULE_TOKEN }}
+      MAIN_REPO_PR_TOKEN: ${{ secrets.SUBMODULE_TOKEN }}
+      GIST_TOKEN: ${{ secrets.GIST_TOKEN }}
+    with:
+      ref: ${{ needs.resolve.outputs.ref }}
+      source_repository: ${{ needs.resolve.outputs.source_repository }}
+      pr_number: ${{ needs.resolve.outputs.pr_number }}
+      comment_id: ${{ needs.resolve.outputs.comment_id }}
+      caller_run_url: ${{ needs.resolve.outputs.caller_run_url }}
+      trigger: ${{ needs.resolve.outputs.trigger }}
+
+  dotnet:
+    if: >-
+      (github.event_name == 'repository_dispatch' && github.event.action == 'test-dotnet') ||
+      (github.event_name == 'workflow_dispatch' && inputs.test == 'dotnet')
+    needs: resolve
+    uses: ./.github/workflows/test-dotnet.yml
+    secrets:
+      SUBMODULE_TOKEN: ${{ secrets.SUBMODULE_TOKEN }}
+      MAIN_REPO_CHECKOUT_TOKEN: ${{ secrets.SUBMODULE_TOKEN }}
+      MAIN_REPO_PR_TOKEN: ${{ secrets.SUBMODULE_TOKEN }}
+      GIST_TOKEN: ${{ secrets.GIST_TOKEN }}
+    with:
+      ref: ${{ needs.resolve.outputs.ref }}
+      source_repository: ${{ needs.resolve.outputs.source_repository }}
+      pr_number: ${{ needs.resolve.outputs.pr_number }}
+      comment_id: ${{ needs.resolve.outputs.comment_id }}
+      caller_run_url: ${{ needs.resolve.outputs.caller_run_url }}
+      trigger: ${{ needs.resolve.outputs.trigger }}
+
+  desktop:
+    if: >-
+      (github.event_name == 'repository_dispatch' && github.event.action == 'test-desktop') ||
+      (github.event_name == 'workflow_dispatch' && inputs.test == 'desktop')
+    needs: resolve
+    uses: ./.github/workflows/test-desktop.yml
+    secrets:
+      SUBMODULE_TOKEN: ${{ secrets.SUBMODULE_TOKEN }}
+      MAIN_REPO_CHECKOUT_TOKEN: ${{ secrets.SUBMODULE_TOKEN }}
+      MAIN_REPO_PR_TOKEN: ${{ secrets.SUBMODULE_TOKEN }}
+      GIST_TOKEN: ${{ secrets.GIST_TOKEN }}
+    with:
+      ref: ${{ needs.resolve.outputs.ref }}
+      source_repository: ${{ needs.resolve.outputs.source_repository }}
+      pr_number: ${{ needs.resolve.outputs.pr_number }}
+      comment_id: ${{ needs.resolve.outputs.comment_id }}
+      caller_run_url: ${{ needs.resolve.outputs.caller_run_url }}
+      trigger: ${{ needs.resolve.outputs.trigger }}
+
+  database:
+    if: >-
+      (github.event_name == 'repository_dispatch' && github.event.action == 'test-database') ||
+      (github.event_name == 'workflow_dispatch' && inputs.test == 'database')
+    needs: resolve
+    uses: ./.github/workflows/test-database.yml
+    secrets:
+      SUBMODULE_TOKEN: ${{ secrets.SUBMODULE_TOKEN }}
+      MAIN_REPO_CHECKOUT_TOKEN: ${{ secrets.SUBMODULE_TOKEN }}
+      MAIN_REPO_PR_TOKEN: ${{ secrets.SUBMODULE_TOKEN }}
+      GIST_TOKEN: ${{ secrets.GIST_TOKEN }}
+    with:
+      ref: ${{ needs.resolve.outputs.ref }}
+      source_repository: ${{ needs.resolve.outputs.source_repository }}
+      pr_number: ${{ needs.resolve.outputs.pr_number }}
+      comment_id: ${{ needs.resolve.outputs.comment_id }}
+      caller_run_url: ${{ needs.resolve.outputs.caller_run_url }}
+      trigger: ${{ needs.resolve.outputs.trigger }}
