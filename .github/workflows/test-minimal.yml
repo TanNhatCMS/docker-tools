@@ -1,6 +1,4 @@
 name: Test Minimal
-run-name: "Test Minimal · ${{ github.sha }}"
-
 permissions:
   contents: read
 on:
