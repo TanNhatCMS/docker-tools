@@ -1,4 +1,12 @@
 name: Test Minimal
+run-name: "Test Minimal · ${{ github.sha }}"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.sha }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
 on:
   workflow_call:
     inputs:
@@ -26,6 +34,10 @@ on:
         type: string
         required: false
         default: 'workflow_call'
+      coverage_gist_id:
+        type: string
+        required: false
+        default: ''
     secrets: {}
 jobs:
   echo:
