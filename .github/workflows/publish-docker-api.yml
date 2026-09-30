@@ -132,7 +132,9 @@ jobs:
         id: meta
         uses: docker/metadata-action@v6
         with:
-          images: ${{ env.REGISTRY }}/${{ env.OWNER }}/qlcv-api
+          images: ${ env.REGISTRY }/${ env.OWNER }/task-manager-packages/qlcv-api
+          labels: |
+            org.opencontainers.image.source=https://github.com/${ github.repository_owner }/task-manager-packages
           flavor: |
             latest=false
           tags: |
@@ -151,7 +153,7 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: |
-            type=registry,ref=${{ env.REGISTRY }}/${{ env.OWNER }}/qlcv-api:latest${{ steps.lane.outputs.suffix }}
+            type=registry,ref=${{ env.REGISTRY }}/${{ env.OWNER }}/task-manager-packages/qlcv-api:latest${{ steps.lane.outputs.suffix }}
             type=gha,scope=publish-api
           cache-to: type=gha,mode=max,scope=publish-api
           provenance: false
@@ -165,7 +167,7 @@ jobs:
         run: |
           echo "## 🐳 API Image Published" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "**Image:** \`${{ env.REGISTRY }}/${{ env.OWNER }}/qlcv-api\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "**Image:** \`${{ env.REGISTRY }}/${{ env.OWNER }}/task-manager-packages/qlcv-api\`" >> "$GITHUB_STEP_SUMMARY"
           echo "**Version:** \`${{ steps.version.outputs.version }}\`" >> "$GITHUB_STEP_SUMMARY"
           echo "**Branch:** \`${{ inputs.branch }}\`" >> "$GITHUB_STEP_SUMMARY"
           echo "**Digest:** \`${{ steps.build.outputs.digest }}\`" >> "$GITHUB_STEP_SUMMARY"

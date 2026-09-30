@@ -145,7 +145,9 @@ jobs:
         id: meta
         uses: docker/metadata-action@v6
         with:
-          images: ${{ env.REGISTRY }}/${{ env.OWNER }}/qlcv-web
+          images: ${ env.REGISTRY }/${ env.OWNER }/task-manager-packages/qlcv-web
+          labels: |
+            org.opencontainers.image.source=https://github.com/${ github.repository_owner }/task-manager-packages
           flavor: |
             latest=false
           tags: |
@@ -166,10 +168,10 @@ jobs:
           # Layer deps (pnpm install) được giữ cache qua registry buildcache + gha
           # để không phải reinstall khi pnpm-lock.yaml không đổi.
           cache-from: |
-            type=registry,ref=${{ env.REGISTRY }}/${{ env.OWNER }}/qlcv-web:buildcache${{ steps.lane.outputs.suffix }}
+            type=registry,ref=${{ env.REGISTRY }}/${{ env.OWNER }}/task-manager-packages/qlcv-web:buildcache${{ steps.lane.outputs.suffix }}
             type=gha,mode=max,scope=publish-web
           cache-to: |
-            type=registry,ref=${{ env.REGISTRY }}/${{ env.OWNER }}/qlcv-web:buildcache${{ steps.lane.outputs.suffix }},mode=max
+            type=registry,ref=${{ env.REGISTRY }}/${{ env.OWNER }}/task-manager-packages/qlcv-web:buildcache${{ steps.lane.outputs.suffix }},mode=max
             type=gha,mode=max,scope=publish-web
           provenance: false
           sbom: false
@@ -192,7 +194,7 @@ jobs:
         run: |
           echo "## 🌐 Web Image Published" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "**Image:** \`${{ env.REGISTRY }}/${{ env.OWNER }}/qlcv-web\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "**Image:** \`${{ env.REGISTRY }}/${{ env.OWNER }}/task-manager-packages/qlcv-web\`" >> "$GITHUB_STEP_SUMMARY"
           echo "**Version:** \`${{ steps.version.outputs.version }}\`" >> "$GITHUB_STEP_SUMMARY"
           echo "**Branch:** \`${{ inputs.branch }}\`" >> "$GITHUB_STEP_SUMMARY"
           echo "**Digest:** \`${{ steps.build.outputs.digest }}\`" >> "$GITHUB_STEP_SUMMARY"
