@@ -146,13 +146,29 @@ jobs:
         with:
           bun-version: latest
 
-      - name: Install dependencies
+      - name: Detect layout (monorepo vs standalone)
+        run: |
+          if [ -f desktop/Cargo.toml ]; then
+            echo "DESKTOP_ROOT=database" >> "$GITHUB_ENV"
+          else
+            echo "DESKTOP_ROOT=." >> "$GITHUB_ENV"
+          fi
+
+
         id: install
         run: pnpm install --frozen-lockfile
 
-      - name: Build frontend static export
+      - name: Build frontend static export (monorepo) hoac dummy dist (standalone)
         id: build_ui
-        run: bun run build:tauri-ui
+        run: |
+          if [ "$DESKTOP_ROOT" = "desktop" ]; then
+            bun run build:tauri-ui
+          else
+            # Standalone: frontendDist ../frontend/dist chua ton tai — tao dummy de
+            # tauri::generate_context! compile duoc (cargo test khong render UI that).
+            mkdir -p ../frontend/dist
+            echo '<!DOCTYPE html><html><body>dummy dist for CI</body></html>' > ../frontend/dist/index.html
+          fi
 
       - name: Setup Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -170,7 +186,7 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             artifacts/target
-          key: ${{ runner.os }}-cargo-test-${{ hashFiles('desktop/Cargo.lock') }}
+          key: ${{ runner.os }}-cargo-test-${{ hashFiles(format('{0}/Cargo.lock', env.DESKTOP_ROOT)) }}
           restore-keys: |
             ${{ runner.os }}-cargo-test-
 
@@ -179,7 +195,7 @@ jobs:
         if: env.WITH_COVERAGE != 'true'
         env:
           RUSTFLAGS: ''
-        run: cargo test --manifest-path desktop/Cargo.toml --all-features
+        run: cargo test --manifest-path $DESKTOP_ROOT/Cargo.toml --all-features
 
       - name: Run tests with coverage
         id: tests_cov
@@ -188,7 +204,7 @@ jobs:
           RUSTFLAGS: ''
         run: |
           mkdir -p coverage
-          cargo llvm-cov --manifest-path desktop/Cargo.toml --all-features --cobertura --output-path coverage/desktop-coverage.xml
+          cargo llvm-cov --manifest-path $DESKTOP_ROOT/Cargo.toml --all-features --cobertura --output-path coverage/desktop-coverage.xml
 
       - name: Code Coverage Summary
         if: env.WITH_COVERAGE == 'true'

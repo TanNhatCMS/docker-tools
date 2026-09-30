@@ -140,6 +140,14 @@ jobs:
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
 
+      - name: Detect layout (monorepo vs standalone)
+        run: |
+          if [ -f database/schema.prisma ]; then
+            echo "DB_ROOT=database" >> "$GITHUB_ENV"
+          else
+            echo "DB_ROOT=." >> "$GITHUB_ENV"
+          fi
+
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
@@ -149,7 +157,7 @@ jobs:
       - name: Check for database backup
         id: backup
         run: |
-          BACKUP_FILE=$(find database/test/backup -name "*.sql" -type f 2>/dev/null | head -1)
+          BACKUP_FILE=$(find "$DB_ROOT/test/backup" -name "*.sql" -type f 2>/dev/null | head -1)
           if [ -n "$BACKUP_FILE" ]; then
             echo "found=true" >> $GITHUB_OUTPUT
             echo "file=$BACKUP_FILE" >> $GITHUB_OUTPUT
@@ -189,7 +197,7 @@ jobs:
         if: steps.backup.outputs.found == 'false'
         run: |
           echo "🌱 Running database seed..."
-          bun database/seed.ts || {
+          bun "$DB_ROOT/seed.ts" || {
             echo "status=failed" >> $GITHUB_OUTPUT
             echo "❌ Seed failed!"
             exit 1
