@@ -30,6 +30,11 @@ on:
         type: string
         required: false
         default: ''
+      source_repository:
+        description: 'Repo chứa source cần build (mặc định: repo caller; task-manager-packages truyền task-manager)'
+        type: string
+        required: false
+        default: ''
       branch:
         description: 'Branch name for image lane tagging (default: main lane, no prefix)'
         type: string
@@ -80,6 +85,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v7
         with:
+          repository: ${{ inputs.source_repository || github.repository }}
           ref: ${{ inputs.ref || github.sha }}
           fetch-depth: 1
           token: ${{ secrets.SUBMODULE_TOKEN || secrets.MAIN_REPO_CHECKOUT_TOKEN || github.token }}
@@ -152,7 +158,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v6
         with:
-          images: ${{ env.REGISTRY }}/${{ env.OWNER }}/task-manager-packages/task-manager-web${{ steps.lane.outputs.name_suffix }}
+          images: ${{ env.REGISTRY }}/${{ env.OWNER }}/task-manager-web${{ steps.lane.outputs.name_suffix }}
           labels: |
             org.opencontainers.image.source=https://github.com/${{ github.repository_owner }}/task-manager-packages
           flavor: |
@@ -175,10 +181,10 @@ jobs:
           # Layer deps (pnpm install) được giữ cache qua registry buildcache + gha
           # để không phải reinstall khi pnpm-lock.yaml không đổi.
           cache-from: |
-            type=registry,ref=${{ env.REGISTRY }}/${{ env.OWNER }}/task-manager-packages/task-manager-web${{ steps.lane.outputs.name_suffix }}:buildcache${{ steps.lane.outputs.suffix }}
+            type=registry,ref=${{ env.REGISTRY }}/${{ env.OWNER }}/task-manager-web${{ steps.lane.outputs.name_suffix }}:buildcache${{ steps.lane.outputs.suffix }}
             type=gha,mode=max,scope=publish-web
           cache-to: |
-            type=registry,ref=${{ env.REGISTRY }}/${{ env.OWNER }}/task-manager-packages/task-manager-web${{ steps.lane.outputs.name_suffix }}:buildcache${{ steps.lane.outputs.suffix }},mode=max
+            type=registry,ref=${{ env.REGISTRY }}/${{ env.OWNER }}/task-manager-web${{ steps.lane.outputs.name_suffix }}:buildcache${{ steps.lane.outputs.suffix }},mode=max
             type=gha,mode=max,scope=publish-web
           provenance: false
           sbom: false
@@ -201,7 +207,7 @@ jobs:
         run: |
           echo "## 🌐 Web Image Published" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "**Image:** \`${{ env.REGISTRY }}/${{ env.OWNER }}/task-manager-packages/task-manager-web${{ steps.lane.outputs.name_suffix }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "**Image:** \`${{ env.REGISTRY }}/${{ env.OWNER }}/task-manager-web${{ steps.lane.outputs.name_suffix }}\`" >> "$GITHUB_STEP_SUMMARY"
           echo "**Version:** \`${{ steps.version.outputs.version }}\`" >> "$GITHUB_STEP_SUMMARY"
           echo "**Branch:** \`${{ inputs.branch }}\`" >> "$GITHUB_STEP_SUMMARY"
           echo "**Digest:** \`${{ steps.build.outputs.digest }}\`" >> "$GITHUB_STEP_SUMMARY"

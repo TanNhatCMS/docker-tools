@@ -30,6 +30,11 @@ on:
         type: string
         required: false
         default: ''
+      source_repository:
+        description: 'Repo chứa source cần build (mặc định: repo caller; task-manager-packages truyền task-manager)'
+        type: string
+        required: false
+        default: ''
       branch:
         description: 'Branch name — tag `latest` chỉ được push khi branch == main'
         type: string
@@ -54,7 +59,7 @@ env:
   REGISTRY: ghcr.io
   # Ảnh publish về namespace của caller repo (GITHUB_TOKEN + packages:write đủ quyền push)
   OWNER: ${{ github.repository_owner }}
-  IMAGE_NAME: task-manager-packages/task-manager-migrator
+  IMAGE_NAME: task-manager-migrator
 
 permissions:
   contents: read
@@ -70,6 +75,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v7
         with:
+          repository: ${{ inputs.source_repository || github.repository }}
           ref: ${{ inputs.ref || github.sha }}
           fetch-depth: 1
           token: ${{ secrets.SUBMODULE_TOKEN || secrets.MAIN_REPO_CHECKOUT_TOKEN || github.token }}
@@ -93,7 +99,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v6
         with:
-          images: ${{ env.REGISTRY }}/${{ env.OWNER }}/task-manager-packages/task-manager-migrator${{ inputs.branch == 'dev' && '-dev' || '' }}
+          images: ${{ env.REGISTRY }}/${{ env.OWNER }}/task-manager-migrator${{ inputs.branch == 'dev' && '-dev' || '' }}
           labels: |
             org.opencontainers.image.source=https://github.com/${{ github.repository_owner }}/task-manager-packages
           tags: |

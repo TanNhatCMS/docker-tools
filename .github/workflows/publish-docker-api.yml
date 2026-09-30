@@ -30,6 +30,11 @@ on:
         type: string
         required: false
         default: ''
+      source_repository:
+        description: 'Repo chứa source cần build (mặc định: repo caller; task-manager-packages truyền task-manager)'
+        type: string
+        required: false
+        default: ''
       branch:
         description: 'Branch name for image lane tagging (default: main lane, no prefix)'
         type: string
@@ -72,6 +77,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v7
         with:
+          repository: ${{ inputs.source_repository || github.repository }}
           ref: ${{ inputs.ref || github.sha }}
           fetch-depth: 1
           token: ${{ secrets.SUBMODULE_TOKEN || secrets.MAIN_REPO_CHECKOUT_TOKEN || github.token }}
@@ -139,7 +145,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v6
         with:
-          images: ${{ env.REGISTRY }}/${{ env.OWNER }}/task-manager-packages/task-manager-server${{ steps.lane.outputs.name_suffix }}
+          images: ${{ env.REGISTRY }}/${{ env.OWNER }}/task-manager-server${{ steps.lane.outputs.name_suffix }}
           labels: |
             org.opencontainers.image.source=https://github.com/${{ github.repository_owner }}/task-manager-packages
           flavor: |
@@ -160,7 +166,7 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: |
-            type=registry,ref=${{ env.REGISTRY }}/${{ env.OWNER }}/task-manager-packages/task-manager-server${{ steps.lane.outputs.name_suffix }}:latest${{ steps.lane.outputs.suffix }}
+            type=registry,ref=${{ env.REGISTRY }}/${{ env.OWNER }}/task-manager-server${{ steps.lane.outputs.name_suffix }}:latest${{ steps.lane.outputs.suffix }}
             type=gha,scope=publish-api
           cache-to: type=gha,mode=max,scope=publish-api
           provenance: false
@@ -174,7 +180,7 @@ jobs:
         run: |
           echo "## 🐳 API Image Published" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "**Image:** \`${{ env.REGISTRY }}/${{ env.OWNER }}/task-manager-packages/task-manager-server${{ steps.lane.outputs.name_suffix }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "**Image:** \`${{ env.REGISTRY }}/${{ env.OWNER }}/task-manager-server${{ steps.lane.outputs.name_suffix }}\`" >> "$GITHUB_STEP_SUMMARY"
           echo "**Version:** \`${{ steps.version.outputs.version }}\`" >> "$GITHUB_STEP_SUMMARY"
           echo "**Branch:** \`${{ inputs.branch }}\`" >> "$GITHUB_STEP_SUMMARY"
           echo "**Digest:** \`${{ steps.build.outputs.digest }}\`" >> "$GITHUB_STEP_SUMMARY"
