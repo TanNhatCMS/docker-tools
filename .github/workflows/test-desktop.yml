@@ -193,6 +193,15 @@ jobs:
           fi
           test -f frontend/dist/index.html && echo "FE static export OK"
 
+          # Standalone (DESKTOP_ROOT=.): app tai workspace root -> tauri.conf
+          # frontendDist "../frontend/dist" tro ra NGOAI workspace. Mirror dist
+          # sang thu muc do de tauri::generate_context! thay dist that.
+          if [ "$DESKTOP_ROOT" = "." ]; then
+            mkdir -p ../frontend/dist
+            cp -r frontend/dist/. ../frontend/dist/
+            echo "Mirrored dist -> ../frontend/dist"
+          fi
+
       - name: Setup Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
