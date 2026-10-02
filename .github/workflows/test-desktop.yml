@@ -191,7 +191,7 @@ jobs:
             # Monorepo source: script nam o root
             bun scripts/tauri-next-static.ts
           fi
-          test -f ../frontend/dist/index.html && echo "FE static export OK"
+          test -f frontend/dist/index.html && echo "FE static export OK"
 
       - name: Setup Rust toolchain
         uses: dtolnay/rust-toolchain@stable
