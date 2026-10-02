@@ -165,7 +165,8 @@ jobs:
             echo "DESKTOP_ROOT=." >> "$GITHUB_ENV"
           fi
           # Frontend dang sau (desktop/../frontend) — ban build static export se dat o day
-          echo "FRONTEND_DIST=$(cd "$DESKTOP_ROOT" && pwd)/../frontend/dist" >> "$GITHUB_ENV"
+          # ca 2 layout deu co FE tai <workspace>/frontend (submodule hoac checkout path)
+          echo "FRONTEND_DIST=$GITHUB_WORKSPACE/frontend/dist" >> "$GITHUB_ENV"
 
       - name: Install dependencies (desktop)
         id: install
