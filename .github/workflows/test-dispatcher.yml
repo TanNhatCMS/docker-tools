@@ -73,24 +73,33 @@ jobs:
     steps:
       - name: Resolve
         id: ref
+        uses: actions/github-script@v9
         env:
-          GH_TOKEN: ${{ secrets.SUBMODULE_TOKEN }}
-        run: |
-          SOURCE="${{ github.event.client_payload.source_repository || inputs.source_repository }}"
-          REF="${{ github.event.client_payload.ref || inputs.ref || '' }}"
-          if [ -z "$REF" ]; then
-            BRANCH="${{ github.event.client_payload.branch || inputs.branch || 'main' }}"
-            REF=$(gh api "repos/$SOURCE/branches/$BRANCH" --jq .commit.sha)
-            echo "Resolved $SOURCE@$BRANCH head: $REF"
-          fi
-          {
-            echo "ref=$REF"
-            echo "source_repository=$SOURCE"
-            echo "pr_number=${{ github.event.client_payload.pr_number || inputs.pr_number || '' }}"
-            echo "comment_id=${{ github.event.client_payload.comment_id || inputs.comment_id || '' }}"
-            echo "caller_run_url=${{ github.event.client_payload.caller_run_url || '' }}"
-            echo "trigger=${{ github.event.client_payload.trigger || inputs.trigger || github.event.action || 'manual' }}"
-          } >> "$GITHUB_OUTPUT"
+          SOURCE: ${{ github.event.client_payload.source_repository || inputs.source_repository }}
+          REF_IN: ${{ github.event.client_payload.ref || inputs.ref || '' }}
+          BRANCH: ${{ github.event.client_payload.branch || inputs.branch || 'main' }}
+          PR_NUMBER: ${{ github.event.client_payload.pr_number || inputs.pr_number || '' }}
+          COMMENT_ID: ${{ github.event.client_payload.comment_id || inputs.comment_id || '' }}
+          CALLER_RUN_URL: ${{ github.event.client_payload.caller_run_url || '' }}
+          TRIGGER: ${{ github.event.client_payload.trigger || inputs.trigger || github.event.action || 'manual' }}
+        with:
+          github-token: ${{ secrets.SUBMODULE_TOKEN }}
+          script: |
+            const [sOwner, sRepo] = process.env.SOURCE.split('/');
+            let ref = process.env.REF_IN;
+            if (!ref) {
+              const b = await github.rest.repos.getBranch({
+                owner: sOwner, repo: sRepo, branch: process.env.BRANCH,
+              });
+              ref = b.data.commit.sha;
+              core.info(`Resolved ${process.env.BRANCH} head: ${ref}`);
+            }
+            core.setOutput('ref', ref);
+            core.setOutput('source_repository', process.env.SOURCE);
+            core.setOutput('pr_number', process.env.PR_NUMBER);
+            core.setOutput('comment_id', process.env.COMMENT_ID);
+            core.setOutput('caller_run_url', process.env.CALLER_RUN_URL);
+            core.setOutput('trigger', process.env.TRIGGER);
 
   web:
     if: >-
