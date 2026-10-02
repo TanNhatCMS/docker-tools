@@ -1,0 +1,74 @@
+name: Claude Code
+run-name: "${{ github.workflow }} · ${{ github.event_name }} · #${{ github.event.issue.number || github.event.pull_request.number }} · @${{ github.event.sender.login }}"
+
+on:
+  issue_comment:
+    types: [created]
+  pull_request_review_comment:
+    types: [created]
+  issues:
+    types: [opened, assigned]
+  pull_request_review:
+    types: [submitted]
+
+jobs:
+  claude:
+    if: |
+      (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@claude')) ||
+      (github.event_name == 'pull_request_review_comment' && contains(github.event.comment.body, '@claude')) ||
+      (github.event_name == 'pull_request_review' && contains(github.event.review.body, '@claude')) ||
+      (github.event_name == 'issues' && (contains(github.event.issue.body, '@claude') || contains(github.event.issue.title, '@claude')))
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+      id-token: write
+      actions: read # Required for Claude to read CI results on PRs
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          ref: github.sha
+          fetch-depth: 0
+          token: ${{ secrets.SUBMODULE_TOKEN }}
+
+      - name: Run Claude Code
+        id: claude
+        uses: anthropics/claude-code-action@main
+        with:
+          # Authenticate to the Claude API via Workload Identity Federation
+          # (the workflow's OIDC token is exchanged for a short-lived access
+          # token) instead of a static API key. See docs/setup.md.
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+
+          # Optional: add custom plugin marketplaces
+          # plugin_marketplaces: "https://github.com/user/marketplace1.git\nhttps://github.com/user/marketplace2.git"
+          # Optional: install Claude Code plugins
+          # Disabled: "code-review@claude-code-plugins" is no longer resolvable in the
+          # default "claude-code-plugins" marketplace, which fails plugin install and
+          # aborts every @claude run (see run 31694477714).
+          # plugins: "code-review@claude-code-plugins\nfeature-dev@claude-code-plugins"
+          # Optional: grant additional permissions (requires corresponding GitHub token permissions)
+          additional_permissions: |
+            actions: read
+          # Optional: Customize the trigger phrase (default: @claude)
+          # trigger_phrase: "/claude"
+
+          # Optional: Trigger when specific user is assigned to an issue
+          assignee_trigger: 'claude-bot'
+
+          # Optional: Configure Claude's behavior with CLI arguments
+          claude_args: |
+            --allowedTools "Bash(bun install),Bash(bun test:*),Bash(bun run format),Bash(bun typecheck),Bash(npm install),Bash(npm run build),Bash(npm run test:*),Bash(npm run lint:*),Bash(pnpm install),Bash(pnpm run build),Bash(pnpm run test:*),Bash(pnpm run lint:*),Bash(dotnet build:*),Bash(dotnet test:*),Bash(dotnet restore:*),Bash(gh issue create:*),Bash(gh issue list:*),Bash(gh issue view:*),Bash(gh label list:*),Bash(gh pr edit:*)"
+            --model "claude-sonnet-5.5"
+          # --max-turns 10
+          #   --system-prompt "Follow our coding standards. Ensure all new code has tests. Use TypeScript for new files."
+
+          # Optional: Advanced settings configuration
+          # settings: |
+          #   {
+          #     "env": {
+          #       "NODE_ENV": "test"
+          #     }
+          #   }
