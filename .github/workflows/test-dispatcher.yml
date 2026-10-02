@@ -17,7 +17,12 @@
 # =============================================================================
 
 name: Test Dispatcher
-run-name: "${{ github.workflow }} · ${{ github.sha }}"
+run-name: >-
+  Test Dispatcher · ${{ github.event.client_payload.source_repository || github.event.inputs.source_repository || github.repository }}
+  · ${{ github.event.client_payload.pr_number != '' && format('PR #{0}', github.event.client_payload.pr_number)
+       || github.event.client_payload.branch || github.event.inputs.branch || '' }}
+  · ref ${{ github.event.client_payload.ref || github.event.inputs.ref || github.sha }}
+  · ${{ github.event.client_payload.trigger || github.event.inputs.trigger || github.event.action }}
 
 on:
   repository_dispatch:
