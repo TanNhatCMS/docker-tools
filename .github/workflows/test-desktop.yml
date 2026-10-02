@@ -146,29 +146,51 @@ jobs:
         with:
           bun-version: latest
 
+      - name: Checkout frontend (cho static export that)
+        uses: actions/checkout@v7
+        with:
+          repository: phu-nam-hai-jsco/task-manager-frontend
+          ref: main
+          fetch-depth: 1
+          token: ${{ secrets.SUBMODULE_TOKEN || secrets.MAIN_REPO_CHECKOUT_TOKEN || github.token }}
+          path: frontend
+
       - name: Detect layout (monorepo vs standalone)
         run: |
           if [ -f desktop/Cargo.toml ]; then
             echo "DESKTOP_ROOT=desktop" >> "$GITHUB_ENV"
+          elif [ -f apps/desktop/Cargo.toml ]; then
+            echo "DESKTOP_ROOT=apps/desktop" >> "$GITHUB_ENV"
           else
             echo "DESKTOP_ROOT=." >> "$GITHUB_ENV"
           fi
+          # Frontend dang sau (desktop/../frontend) — ban build static export se dat o day
+          echo "FRONTEND_DIST=$(cd "$DESKTOP_ROOT" && pwd)/../frontend/dist" >> "$GITHUB_ENV"
 
-      - name: Install dependencies
+      - name: Install dependencies (desktop)
         id: install
         run: pnpm install --frozen-lockfile
 
-      - name: Build frontend static export (monorepo) hoac dummy dist (standalone)
+      - name: Install dependencies (frontend)
+        working-directory: frontend
+        run: pnpm install --frozen-lockfile
+
+      - name: Build frontend static export (that)
         id: build_ui
+        working-directory: ${{ env.DESKTOP_ROOT }}
+        env:
+          NEXT_TAURI_STATIC_EXPORT: '1'
         run: |
-          if [ "$DESKTOP_ROOT" = "desktop" ]; then
-            bun run build:tauri-ui
+          # tauri-next-static.ts chay `next build` trong ../frontend voi
+          # NEXT_TAURI_STATIC_EXPORT=1 -> static export vao <FE>/dist
+          # (desktop/../frontend = FE checkout o tren).
+          if [ -f scripts/tauri-next-static.ts ]; then
+            bun scripts/tauri-next-static.ts
           else
-            # Standalone: frontendDist ../frontend/dist chua ton tai — tao dummy de
-            # tauri::generate_context! compile duoc (cargo test khong render UI that).
-            mkdir -p ../frontend/dist
-            echo '<!DOCTYPE html><html><body>dummy dist for CI</body></html>' > ../frontend/dist/index.html
+            # Monorepo source: script nam o root
+            bun scripts/tauri-next-static.ts
           fi
+          test -f ../frontend/dist/index.html && echo "FE static export OK"
 
       - name: Setup Rust toolchain
         uses: dtolnay/rust-toolchain@stable
