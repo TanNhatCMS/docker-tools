@@ -119,6 +119,7 @@ jobs:
           fetch-depth: 1
           token: ${{ secrets.SUBMODULE_TOKEN || secrets.MAIN_REPO_CHECKOUT_TOKEN || github.token }}
           submodules: recursive
+          path: desktop
 
       - name: Install system dependencies (Linux / Tauri)
         run: |
@@ -155,52 +156,33 @@ jobs:
           token: ${{ secrets.SUBMODULE_TOKEN || secrets.MAIN_REPO_CHECKOUT_TOKEN || github.token }}
           path: frontend
 
-      - name: Detect layout (monorepo vs standalone)
+      - name: Detect layout
         run: |
-          if [ -f desktop/Cargo.toml ]; then
-            echo "DESKTOP_ROOT=desktop" >> "$GITHUB_ENV"
-          elif [ -f apps/desktop/Cargo.toml ]; then
-            echo "DESKTOP_ROOT=apps/desktop" >> "$GITHUB_ENV"
-          else
-            echo "DESKTOP_ROOT=." >> "$GITHUB_ENV"
-          fi
-          # Frontend dang sau (desktop/../frontend) — ban build static export se dat o day
-          # ca 2 layout deu co FE tai <workspace>/frontend (submodule hoac checkout path)
+          # Desktop repo duoc checkout tai path desktop/ (siblings: desktop/ + frontend/)
+          echo "DESKTOP_ROOT=desktop" >> "$GITHUB_ENV"
+          # tauri.conf frontendDist ../frontend/dist (tu desktop/) = workspace/frontend/dist
           echo "FRONTEND_DIST=$GITHUB_WORKSPACE/frontend/dist" >> "$GITHUB_ENV"
 
       - name: Install dependencies (desktop)
         id: install
+        working-directory: ${{ env.DESKTOP_ROOT }}
         run: pnpm install --frozen-lockfile
 
       - name: Install dependencies (frontend)
         working-directory: frontend
         run: pnpm install --frozen-lockfile
 
-      - name: Build frontend static export (that)
+      - name: Build frontend static export
         id: build_ui
         working-directory: ${{ env.DESKTOP_ROOT }}
         env:
           NEXT_TAURI_STATIC_EXPORT: '1'
         run: |
-          # tauri-next-static.ts chay `next build` trong ../frontend voi
-          # NEXT_TAURI_STATIC_EXPORT=1 -> static export vao <FE>/dist
-          # (desktop/../frontend = FE checkout o tren).
-          if [ -f scripts/tauri-next-static.ts ]; then
-            bun scripts/tauri-next-static.ts
-          else
-            # Monorepo source: script nam o root
-            bun scripts/tauri-next-static.ts
-          fi
-          test -f frontend/dist/index.html && echo "FE static export OK"
-
-          # Standalone (DESKTOP_ROOT=.): app tai workspace root -> tauri.conf
-          # frontendDist "../frontend/dist" tro ra NGOAI workspace. Mirror dist
-          # sang thu muc do de tauri::generate_context! thay dist that.
-          if [ "$DESKTOP_ROOT" = "." ]; then
-            mkdir -p ../frontend/dist
-            cp -r frontend/dist/. ../frontend/dist/
-            echo "Mirrored dist -> ../frontend/dist"
-          fi
+          # tauri-next-static.ts chay `next build` trong ../frontend (sibling)
+          # voi NEXT_TAURI_STATIC_EXPORT=1 -> static export vao ../frontend/dist
+          # = dung path frontendDist cua tauri.conf -> generate_context thay that.
+          bun scripts/tauri-next-static.ts
+          test -f ../frontend/dist/index.html && echo "FE static export OK"
 
       - name: Setup Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -217,7 +199,8 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            artifacts/target
+            ${{ env.DESKTOP_ROOT }}/artifacts/target
+            ${{ env.DESKTOP_ROOT }}/target
           key: ${{ runner.os }}-cargo-test-${{ hashFiles(format('{0}/Cargo.lock', env.DESKTOP_ROOT)) }}
           restore-keys: |
             ${{ runner.os }}-cargo-test-
@@ -225,24 +208,26 @@ jobs:
       - name: Run tests
         id: tests
         if: env.WITH_COVERAGE != 'true'
+        working-directory: ${{ env.DESKTOP_ROOT }}
         env:
           RUSTFLAGS: ''
-        run: cargo test --manifest-path $DESKTOP_ROOT/Cargo.toml --all-features
+        run: cargo test --all-features
 
       - name: Run tests with coverage
         id: tests_cov
         if: env.WITH_COVERAGE == 'true'
+        working-directory: ${{ env.DESKTOP_ROOT }}
         env:
           RUSTFLAGS: ''
         run: |
           mkdir -p coverage
-          cargo llvm-cov --manifest-path $DESKTOP_ROOT/Cargo.toml --all-features --cobertura --output-path coverage/desktop-coverage.xml
+          cargo llvm-cov --all-features --cobertura --output-path coverage/desktop-coverage.xml
 
       - name: Code Coverage Summary
         if: env.WITH_COVERAGE == 'true'
         uses: irongut/CodeCoverageSummary@v1.3.0
         with:
-          filename: coverage/desktop-coverage.xml
+          filename: ${{ env.DESKTOP_ROOT }}/coverage/desktop-coverage.xml
           badge: true
           fail_below_min: false
           format: markdown
@@ -256,7 +241,7 @@ jobs:
         id: coverage
         if: env.WITH_COVERAGE == 'true'
         run: |
-          COVERAGE=$(grep -oP 'line-rate="\K[^"]+' coverage/desktop-coverage.xml | head -1)
+          COVERAGE=$(grep -oP 'line-rate="\K[^"]+' "$DESKTOP_ROOT/coverage/desktop-coverage.xml" | head -1)
           COVERAGE_PCT=$(echo "$COVERAGE * 100" | bc | xargs printf "%.1f")
           echo "percentage=${COVERAGE_PCT}" >> $GITHUB_OUTPUT
           echo "Desktop Coverage: ${COVERAGE_PCT}%"
@@ -279,7 +264,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: desktop-coverage-reports
-          path: coverage/desktop-coverage.xml
+          path: ${{ env.DESKTOP_ROOT }}/coverage/desktop-coverage.xml
           retention-days: 7
           if-no-files-found: ignore
 
